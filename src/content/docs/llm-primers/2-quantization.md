@@ -32,7 +32,7 @@ Keep the mental models. Drop the trivia.
 
 ### 2.1 Three distinct things lower precision buys you
 
-```
+```python
      ┌─────────────────────────────────────────────────────────────┐
      │  Lower precision delivers THREE separable wins              │
      ├─────────────────────────────────────────────────────────────┤

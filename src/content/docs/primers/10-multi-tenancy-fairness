@@ -1,0 +1,337 @@
+---
+title: Multi-tenancy & Fairness
+description: Multi-tenancy & Fairness
+---
+
+### A staff-level interview primer
+
+Companion to the correctness/operability primer. This one is about what happens when multiple independent workloads share the same capacity.
+
+---
+
+## 1. What a staff engineer actually needs to know
+
+Multi-tenancy = one system serving multiple independent clients (tenants, priority classes, request types) over shared capacity. Fairness = no tenant dominates or starves another outside designed policy.
+
+Interviews test:
+- Spotting starvation and head-of-line (HOL) blocking in proposed designs
+- Picking the right tool — admission control vs scheduling vs isolation — for the scenario
+- Reasoning about noisy neighbors in shared resources (cache, threads, GPU memory)
+- Defending the choice of fair-queue algorithm
+- Translating fairness to variable-cost workloads (LLM inference, batch queries)
+
+Skip for most roles: formal scheduling theory, BGP/ATM queueing math, CFS internals. You need a working vocabulary, not academic depth.
+
+**"Fair" does not mean "equal."** Fair means each tenant gets the share they paid/were configured for, and nobody can cheat. Policy (equal / weighted / priority-with-reservation) is yours to design; mechanism enforces it.
+
+---
+
+## 2. Core mental model
+
+Three levers control tenant behavior. Pick deliberately at each layer.
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  ADMISSION   │────►│  SCHEDULING  │────►│  ISOLATION   │
+│  CONTROL     │     │              │     │              │
+│  "accept?"   │     │ "run next?"  │     │ "contain"    │
+└──────────────┘     └──────────────┘     └──────────────┘
+  at the edge         in the queue        resource boundary
+  rate limits         priority / WFQ      separate pools
+  quotas              preemption          bulkheads
+  load shed           aging               cells
+  cheap, coarse       cheap, granular     strong, expensive
+```
+
+If you only pick one: **isolation is the strongest guarantee** but expensive. **Scheduling** is granular but fair only if admission has capped inflight. **Admission** is cheap but blunt. Production systems use all three in layers.
+
+Why this matters:
+- Shared caches, thread pools, queues, GPU memory, connection pools all couple tenants
+- Variable-cost workloads amplify unfairness (a 100× request can't fairly share with a 1× request under request-count fairness)
+- A single misbehaving tenant can melt the whole system without isolation
+
+---
+
+## 3. The problems
+
+### Starvation
+A workload waits forever because higher-priority work keeps arriving.
+
+```
+  Strict priority, no aging:
+  High:  [R1][R2][R3][R4][R5][R6]... (new arrivals)
+  Low:   [L1]   ← never runs
+```
+
+Fixes: **aging** (effective priority rises with wait time), **reserved capacity** for low-pri (guaranteed N% regardless of high-pri backlog), or **WFQ / DRR** instead of strict priority.
+
+### Head-of-line (HOL) blocking
+A slow request at the front of a single queue blocks cheap work behind it.
+
+```
+  [slow 10s] [fast 10ms] [fast 10ms] [fast 10ms]
+     │
+     └─► 3 cheap requests wait ~10s each
+```
+
+Fixes: **multiple queues** keyed by cost class, **work-stealing workers**, **preemption**, **request size classification at admit**, **SRPT** (shortest-remaining-first) with aging.
+
+### Priority inversion
+A low-priority task holds a resource a high-priority task needs; a medium-priority task preempts the low-pri; high-pri now effectively waits on the medium-pri.
+
+```
+  H (high)   needs lock L held by Lp (low)
+  M (medium) arrives, preempts Lp on CPU
+  L still locked — Lp can't progress
+  H blocked on L, can't preempt M
+  → H is effectively below M. This is the inversion.
+```
+
+Famous case: Mars Pathfinder (1997). In practice, it shows up wherever priority classes share:
+- a database connection pool
+- a rate-limiter token
+- a config/lease cache
+- a mutex in shared code
+
+Fixes: **priority inheritance** (lock holder temporarily inherits max waiter's priority), **priority ceiling protocol**, or **eliminate shared mutable state** between priority classes (separate pools).
+
+### Noisy neighbor
+One tenant's traffic degrades another's SLO through any shared resource.
+
+```
+  Tenant A: 500 QPS, heavy batch workload, big requests
+  Tenant B: 10 QPS, latency-critical
+
+  Shared: thread pool, cache, GPU KV memory
+  → B's p99 explodes because A saturates what B needs
+```
+
+Fixes (strong → weak): **dedicated cells** per top-tier tenant, **bulkheads** (separate pools per class), **per-tenant quotas** (cgroups, ResourceQuota, token-work budgets), **rate limits per tenant**.
+
+### Convoy effects
+Bursts of similar requests self-synchronize and amplify contention. Shows up around locks and in JVM GC-paused systems. Mitigate with admission jitter and per-request timeouts so convoys break up.
+
+### Backpressure failures
+No signal goes upstream when downstream is full → queues grow unbounded → latency explodes → timeouts → retries → death spiral.
+
+```
+  Missing backpressure:
+  Client ──┐
+           ▼
+         Queue ──► grows unbounded ──► latency ↑ ──► timeouts ↑ ──► retries ↑ ──► collapse
+
+  With backpressure:
+  Client ◄─── 429 / flow-control ──── Server (queue > threshold)
+```
+
+Fixes: **explicit backpressure** (429, flow control, circuit break), **bounded queues with drop policy**, **deadline propagation** so old work is dropped not executed.
+
+---
+
+## 4. The tools
+
+### Admission control
+Decide at the edge whether to accept a request at all.
+
+- **Static quotas** per tenant: RPS, concurrent requests, tokens/min, bytes/min
+- **Dynamic admission** based on current utilization (CoDel AQM, LIFO shedding under overload)
+- **Priority-aware shedding**: drop low-pri before high-pri when saturated
+- **Deadline-aware**: reject requests whose SLO can't be met anyway (save the work)
+
+Reject early. Work done just to be dropped deep in the stack is the most expensive kind of failure.
+
+### Rate limiting
+
+**Token bucket** — default for APIs. Bucket holds N tokens, refills at rate R. Request consumes k tokens. Allows controlled bursts (up to bucket size), then rate-limited.
+
+```
+         refill at rate R
+              │
+         ┌────▼────┐
+         │ ●●●●●● │   ← tokens, capacity N
+         └─────────┘
+              │
+    request (cost k):
+      if bucket ≥ k → consume k, proceed
+      else          → reject or queue
+```
+
+**Leaky bucket** — requests enter a queue draining at constant rate. No bursts permitted. Use when downstream can't tolerate bursts at all.
+
+**Key identity decisions**:
+- Rate limit by **tenant ID**, not IP (NATs make IP limiting pointless)
+- Include **operation class** in the key (reads and writes priced differently)
+- For distributed limiters: Redis + atomic ops, or sliding-window counters with coordinated gossip
+
+### Fair queuing algorithms
+
+| Algorithm | How it works | When to use |
+|---|---|---|
+| **FIFO** | single queue, serve in order | uniform cost, no tiers, simplest |
+| **Strict priority** | N queues, always drain highest first | SLO tiers, + requires aging to avoid starvation |
+| **Round robin (RR)** | one from each queue per round | equal-cost, equal-share |
+| **Weighted RR (WRR)** | counts proportional to weight | equal-cost with priorities |
+| **Deficit Round Robin (DRR)** | each queue has a cost-unit quantum; unused accumulates | **variable-cost**, the production default |
+| **Weighted Fair Queuing (WFQ)** | ideal fairness, O(log N) per op | mostly academic; DRR is good enough |
+| **SRPT** | shortest-remaining first | known cost, optimal mean latency, starves long requests without aging |
+
+**DRR, the workhorse.** Per-queue quantum measured in *cost units* (bytes, tokens, FLOPs — whatever your capacity is). Each round, add quantum to each queue's deficit; serve from a queue while its deficit covers the head-of-queue's cost. Variable-cost correct, O(1) per dequeue.
+
+```
+  FIFO (mixed tenants)              DRR per tenant
+  ─────────────────────              ──────────────────────
+  [A large][B small][A][A]           A: [a1 big][a2][a3]
+  B blocked by A's big req           B: [b1][b2]
+                                     Each round: each tenant
+                                     gets its quantum of work.
+                                     B progresses independent of A.
+```
+
+**Staff default:** DRR per tenant + token bucket at admit + separate pools for latency-sensitive classes.
+
+### Isolation, strong → weak
+
+1. **Cells / separate clusters**: full stack per tenant tier. Near-perfect isolation. Expensive. Used for top customers or regulated workloads.
+2. **Dedicated pools**: shared cluster, pinned worker pools per class.
+3. **Resource quotas**: cgroups, namespaces, k8s ResourceQuota, GPU MIG partitions.
+4. **Logical fair-share**: shared workers, fair scheduling.
+
+Pick based on blast-radius appetite and cost. Gold tier often gets cells; free tier gets fair-share.
+
+```
+  Shared everything                  Cell-isolated
+  ┌─────────────────────┐            ┌────┐┌────┐┌────┐
+  │  all tenants        │            │ c1 ││ c2 ││ c3 │
+  │  one stack          │            │ T1 ││ T2 ││T3+ │
+  └─────────────────────┘            └────┘└────┘└────┘
+  worst tenant = worst SLO           isolated blast radius
+```
+
+---
+
+## 5. Multi-tenancy in LLM inference (why this breaks naive fairness)
+
+Classical multi-tenant scheduling assumes roughly uniform request cost. LLM inference violates this hard.
+
+- **Variable cost.** A 100-input/50-output request costs ~1% of 32K-input/2K-output. Request-count fairness is wrong; fairness must be in **token-work units** (prefill FLOPs + decode FLOPs + KV-bytes-seconds).
+- **Unknown output length.** True cost isn't known until the request finishes. Admission must use an estimator with a margin; the scheduler needs a kill path for runaways.
+- **Shared KV memory.** All concurrent requests share GPU HBM for KV. One long-context request can starve many short ones of *memory*, not compute.
+- **Continuous batching couples tenants.** Every active request shares every decode step's batch. Admitting, preempting, or completing any request changes batch shape.
+- **Prefix cache breaks CPU-time fairness.** A request that hits a warm prefix is 10× cheaper than one that misses. Equal GPU time ≠ equal user latency. Routing policy interacts with fairness.
+- **Spec decoding adds hidden cost.** Target model runs even on rejection. Per-tenant metering should account for it.
+
+Implication: **token-work quotas + context-length tiers + prefix-aware routing with overload override** is the minimum viable fairness design.
+
+---
+
+## 6. Interview reasoning patterns
+
+**"How do you prevent one tenant from degrading another?"**
+Layered. Per-tenant rate limit at admit → per-tenant token-work quota → DRR scheduler across tenants → bulkheaded worker pools for priority classes → dedicated cells for top tenants. Name the layer, name the guarantee it provides, name what it doesn't cover.
+
+**"FIFO vs priority vs WFQ — how do you choose?"**
+Uniform cost, no tiers → FIFO + admission rate limit. SLO tiers, uniform cost → strict priority + aging + reserved low-pri share. Variable cost, tenant fairness → DRR with cost-weighted quantum.
+
+**"What's the blast radius of a runaway tenant?"**
+Only as small as your weakest isolation layer. Without isolation: all tenants. With per-tenant RL: that tenant × the RL duration. With bulkhead: one pool. With cell: one cell. Explicit answer beats hand-waving.
+
+**"How do you shed load?"**
+Priority-aware, deadline-aware, at the admission layer. Shed lowest priority first. Shed requests that can't meet SLO anyway. LIFO when admitting under overload (newer requests more likely to be wanted). Prefer rejecting at admit over timing out mid-flight.
+
+**"Where's HOL blocking in this design?"**
+Walk every queue in the design. Any FIFO with mixed-cost traffic is a candidate. Any lock ordering between priority classes is a priority-inversion candidate.
+
+**"How do you design rate limiting for a distributed API?"**
+Key by tenant ID + operation class. Token bucket per key. Distributed state via Redis (atomic INCR + TTL) or local counters with leader-coordinated gossip. Return 429 with Retry-After. Include request cost, not just count, for variable-cost APIs.
+
+---
+
+## 7. Common candidate mistakes
+
+- Treating "one queue" as acceptable in any multi-tenant design
+- Strict priority without aging or reserved low-pri share → starvation
+- `1 request = 1 unit` fairness in variable-cost workloads
+- Rate-limiting by IP instead of tenant (NATs bypass it)
+- Ignoring priority inversion around shared locks / tokens / pools
+- Unbounded queues (no backpressure → death spiral)
+- Shedding at workers instead of at admission (wasted work)
+- Shared thread pool across priority classes (no bulkhead)
+- Ignoring the prefix cache when reasoning about inference fairness
+- Assuming downstream rate limiters know tenant identity (they usually don't)
+- No deadline propagation → systems do stale work
+
+---
+
+## 8. Cheat sheet
+
+### Fairness design checklist
+- [ ] Tenant identity propagated through every layer (header, context, logs, metrics)
+- [ ] Per-tenant admission control (RPS, concurrency, token-work/min)
+- [ ] Cost-aware scheduling unit (not just request count)
+- [ ] DRR or priority-with-aging across tenants
+- [ ] Priority classes in separate pools (bulkheads)
+- [ ] Backpressure propagated upstream; no unbounded queues
+- [ ] Deadline-aware admission and shedding
+- [ ] Priority inversion analyzed on every shared mutex / token / pool
+- [ ] Top tenants on cells if SLO-critical
+- [ ] Per-tenant metrics and SLO dashboards
+
+### Decision tree: which tool?
+
+```
+  Tenants share this resource?
+     │
+     ├── No:  done.
+     │
+     └── Yes: is the cost per op ≈ uniform?
+                │
+                ├── Yes: is there SLO tiering?
+                │        ├── No:  FIFO + rate limit at admit
+                │        └── Yes: strict priority + aging + reserved low-pri
+                │
+                └── No (variable cost):
+                         Can one tenant starve memory/state?
+                           ├── Yes: per-tenant quota on that resource
+                           │        + DRR with cost-weighted quantum
+                           │        + bulkhead for critical classes
+                           └── No:  DRR with cost-weighted quantum
+                                    + rate limit at admit
+```
+
+### 10 likely questions + short strong answers
+
+**1. "Design rate limiting for a multi-tenant API."**
+Edge limiter keyed by tenant ID (not IP). Token bucket per tenant × operation class. Capacity and refill from tier config. Distributed via Redis (atomic INCR/DECR + TTL) or local with coordinated replication. Return 429 with Retry-After. Include request cost (e.g., weight reads 1, writes 5) for variable-cost APIs.
+
+**2. "A tenant's traffic is degrading everyone. What now?"**
+Short-term: emergency per-tenant cap + CB their dependency chain if retries are amplifying. Medium: move them to a dedicated pool/cell. Long: lower their tier, enforce DRR with weighted quantum, verify bulkheads hold under synthetic overload.
+
+**3. "Where's priority inversion in this system?"**
+Any shared mutable resource behind a lock: connection pool, rate-limiter token, config cache, GPU scheduler token. If a low-pri path can hold it, a high-pri path waiting can be preempted by medium-pri. Mitigate: priority inheritance on locks, or eliminate sharing by bulkheading pools per class.
+
+**4. "LLM inference: one tenant hogs KV memory. Fix?"**
+Per-tenant KV budget (max bytes-seconds of reservation). Admit only if budget available. Evict lowest-priority request's KV under pressure with swap-to-CPU fallback. Separate pools by context-length tier so long-context requests don't compete with short.
+
+**5. "Starvation-proof priority scheduling."**
+Strict priority + aging: waiting time raises effective priority; eventually bubbles to top. Or reserved share: guarantee ≥ N% of capacity for low-pri regardless of high-pri backlog. Ideally both.
+
+**6. "How do you do fair scheduling when request cost is unknown in advance?"**
+Estimator (model or quantile) predicts cost. Admit using estimate + margin. Meter actual cost during execution; kill or cap if it exceeds estimate by factor k. Reconcile estimator calibration continuously. DRR deficit updated with *actual* cost, not estimate.
+
+**7. "What's the difference between admission control and scheduling?"**
+Admission: binary accept/reject at the edge, based on global capacity and per-tenant quotas. Cheap, coarse. Scheduling: order and timing of accepted requests through the system, based on priority / fairness / deadlines. Granular, relies on admission having bounded inflight load.
+
+**8. "How do you handle head-of-line blocking?"**
+Separate queues by cost class (classify at admit). Work-steal across queue workers. Preemption for latency-critical. SRPT with aging when cost is known. Never one FIFO for mixed costs.
+
+**9. "Bounded vs unbounded queues."**
+Always bounded in production. Unbounded = latency diverges under overload = retries = collapse. Bounded with explicit drop policy (LIFO under overload, priority-aware, deadline-aware) + backpressure signal upstream.
+
+**10. "How do you isolate a 'whale' tenant?"**
+Cell-based isolation: dedicated stack. Or at minimum, dedicated pool with independent rate limits and compute reservation. Monitor spillover: the only coupling should be cross-cell control plane (auth, billing), not data plane. Kill switch to redirect whale to a reserved cell under incident.
+
+---
+
+One-line mental summary:
+
+> *Name the tenants. Bound the queues. Isolate the classes. Meter in cost units, not request counts. Backpressure everywhere. Kill the whale in its own cell.*

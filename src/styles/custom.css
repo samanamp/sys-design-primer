@@ -1,0 +1,67 @@
+:root {
+    --sl-color-accent-low: #11261f;
+    --sl-color-accent: #3fbf8f;
+    --sl-color-accent-high: #9ff2cf;
+
+    --sl-color-white: #e6e6e6;
+    --sl-color-gray-1: #cfcfcf;
+    --sl-color-gray-2: #b5b5b5;
+    --sl-color-gray-3: #8d8d8d;
+    --sl-color-gray-4: #5e5e5e;
+    --sl-color-gray-5: #3b3b3b;
+    --sl-color-gray-6: #2a2a2a;
+    --sl-color-black: #121212;
+}
+
+/* Dark theme tuning */
+:root[data-theme='dark'] {
+    --sl-color-bg: #121212;
+    --sl-color-bg-nav: #151515;
+    --sl-color-bg-sidebar: #161616;
+    --sl-color-bg-inline-code: #1d1d1d;
+
+    --sl-color-text: #d8d8d8;
+    --sl-color-text-accent: #7ce0b4;
+    --sl-color-text-invert: #111;
+
+    --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
+    --sl-color-hairline: rgba(255, 255, 255, 0.1);
+    --sl-color-hairline-shade: rgba(255, 255, 255, 0.16);
+}
+
+/* Slightly warmer content area */
+main {
+    background: #141414;
+}
+
+/* Sidebar softer than full black */
+.sidebar-pane,
+.right-sidebar {
+    background: #151515;
+}
+
+/* Content cards / code blocks */
+pre,
+.expressive-code,
+code {
+    border-radius: 10px;
+}
+
+/* Links */
+a {
+    text-decoration-thickness: 1px;
+}
+
+/* Headings slightly softer */
+h1,
+h2,
+h3,
+h4 {
+    color: #f0f0f0;
+}
+
+/* Paragraph text */
+p,
+li {
+    color: #d2d2d2;
+}
