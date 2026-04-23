@@ -17,7 +17,7 @@ export default defineConfig({
 					// 	// Each item here is one entry in the navigation menu.
 					// 	{ label: 'Long-Context LLMs & Context Management', slug: 'primers/1-longcontext' },
 					// ],
-					autogenerate: { directory: 'primers' },
+					autogenerate: { directory: 'llm-primers' },
 				},
 				{
 					label: 'LLM Sys Design',
