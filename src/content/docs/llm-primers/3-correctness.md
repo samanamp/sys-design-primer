@@ -1,7 +1,8 @@
 ---
-title: LLM Inference Systems: Correctness & Operability
-description: LLM Inference Systems: Correctness & Operability
+title: "LLM Inference Systems: Correctness & Operability"
+description: "LLM Inference Systems: Correctness & Operability"
 ---
+
 ### A staff-level interview primer
 
 Companion to the distsys correctness/operability and multi-tenancy primers. This one is domain-specific: what changes when the system you're serving is a large language model.
