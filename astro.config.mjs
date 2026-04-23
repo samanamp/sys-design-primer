@@ -25,8 +25,8 @@ export default defineConfig({
 					autogenerate: { directory: 'llm-sysdesign' },
 				},
 				{
-					label: 'Reference',
-					autogenerate: { directory: 'reference' },
+					label: 'Primers',
+					autogenerate: { directory: 'primers' },
 				},
 			],
 		}),
