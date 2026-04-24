@@ -2,7 +2,10 @@
 title: Distributed counter at scale
 description: Distributed counter at scale
 ---
-
+```
+"Design a system that counts events (think: video views, like counts, ad impressions) with eventual consistency. 200B events/day, counters need to be readable within a few seconds of write. Tail latency on reads matters."
+```
+---
 # Counter System at 200B events/day
  
 ## 1. Scope and requirements

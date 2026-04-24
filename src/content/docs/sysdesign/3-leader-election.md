@@ -3,7 +3,9 @@ title: Leader election
 description: Leader election
 ---
 
-Fair. Let me rewrite this so you actually understand it. I'll build up from the problem, show the math explicitly, and keep the staff signals — but explain *why* each one matters instead of just tagging them.
+```
+"We have a control plane service that must have exactly one active leader at a time to avoid split-brain on cluster operations. Design the leader election and failover system. RTO target: under 30 seconds."
+```
 
 ---
 

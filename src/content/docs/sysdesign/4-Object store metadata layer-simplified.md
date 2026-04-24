@@ -4,8 +4,9 @@ description: Object store metadata layer
 ---
 # S3 Metadata Layer — The Simpler Walkthrough
 
-This is the same design as before, but built up from the problem so you can see *why* each decision is forced. Staff signals are called out inline with an explanation of why that move matters in an interview, not just a tag.
-
+```
+"Build the metadata layer for an S3-like object store. Blob data is handled elsewhere. We need list operations, prefix queries, versioning, and strong consistency for a single key. Target: 10M ops/sec peak, p99 < 50ms for point lookups."
+```
 ---
 
 ## Part 1: What this system actually does
