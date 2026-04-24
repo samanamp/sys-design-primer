@@ -28,6 +28,10 @@ export default defineConfig({
 					label: 'Primers',
 					autogenerate: { directory: 'primers' },
 				},
+				{
+					label: 'Misc',
+					autogenerate: { directory: 'misc' },
+				},
 			],
 		}),
 	],
