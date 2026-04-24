@@ -29,6 +29,10 @@ export default defineConfig({
 					autogenerate: { directory: 'primers' },
 				},
 				{
+					label: 'Sys Design',
+					autogenerate: { directory: 'sysdesign' },
+				},
+				{
 					label: 'Misc',
 					autogenerate: { directory: 'misc' },
 				},
