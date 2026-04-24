@@ -32,6 +32,10 @@ export default defineConfig({
 					label: 'Misc',
 					autogenerate: { directory: 'misc' },
 				},
+				{
+					label: 'Modern Coding',
+					autogenerate: { directory: 'coding' },
+				},
 			],
 		}),
 	],
