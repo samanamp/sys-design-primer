@@ -5,6 +5,10 @@ description: Object store metadata layer
 
 # S3-like Object Store: Metadata Layer Design
 
+```
+"Build the metadata layer for an S3-like object store. Blob data is handled elsewhere. We need list operations, prefix queries, versioning, and strong consistency for a single key. Target: 10M ops/sec peak, p99 < 50ms for point lookups."
+```
+---
 ## 1. Scope and Reframing
 
 Before I draw anything, let me commit to what we're solving.
