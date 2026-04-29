@@ -40,6 +40,10 @@ export default defineConfig({
 					label: 'Modern Coding',
 					autogenerate: { directory: 'coding' },
 				},
+				{
+					label: '40min interviews',
+					autogenerate: { directory: '40-min-interview' },
+				},
 			],
 		}),
 	],
