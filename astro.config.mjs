@@ -37,6 +37,10 @@ export default defineConfig({
 					autogenerate: { directory: 'misc' },
 				},
 				{
+					label: 'Linear Algebra & Backprop',
+					autogenerate: { directory: 'ml-coding' },
+				},
+				{
 					label: 'Modern Coding',
 					autogenerate: { directory: 'coding' },
 				},
