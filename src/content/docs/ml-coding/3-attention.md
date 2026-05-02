@@ -24,13 +24,13 @@ def mha_forward(X, Wq, Wk, Wv, Wo, num_heads, mask=None):
     # --- Head split: reshape THEN transpose ---
     # Reshape splits the last dim into (H, d_k); transpose moves H next to batch.
     # Doing reshape(B, H, T, d_k) directly would interleave heads incorrectly.
-    Qh = Q.reshape(B, T, H, d_k).transpose(0, 2, 1, 3)           # (B, H, T, d_k)
-    Kh = K.reshape(B, T, H, d_k).transpose(0, 2, 1, 3)           # (B, H, T, d_k)
-    Vh = V.reshape(B, T, H, d_k).transpose(0, 2, 1, 3)           # (B, H, T, d_k)
+    Qh = Q.reshape(B, T, H, d_k).transpose(1,2)           # (B, H, T, d_k)
+    Kh = K.reshape(B, T, H, d_k).transpose(1,2)           # (B, H, T, d_k)
+    Vh = V.reshape(B, T, H, d_k).transpose(1,2)           # (B, H, T, d_k)
 
     # --- Scaled dot-product scores ---
     # (B, H, T, d_k) @ (B, H, d_k, T) -> (B, H, T, T)
-    S = np.matmul(Qh, Kh.swapaxes(-1, -2)) * scale               # (B, H, T, T)
+    S = Qh @ Kh.transpose(-1, -2) * scale               # (B, H, T, T)
 
     # --- Additive mask (broadcast across H) ---
     if mask is not None:
@@ -50,10 +50,10 @@ def mha_forward(X, Wq, Wk, Wv, Wo, num_heads, mask=None):
 
     # --- Apply attention to V ---
     # (B, H, T, T) @ (B, H, T, d_k) -> (B, H, T, d_k)
-    A = np.matmul(P, Vh)                                         # (B, H, T, d_k)
+    A = P @ Vh                                         # (B, H, T, d_k)
 
     # --- Head merge: transpose THEN reshape (inverse of head split) ---
-    A_merged = A.transpose(0, 2, 1, 3).reshape(B, T, D)          # (B, T, D)
+    A_merged = A.transpose(1, 2).reshape(B, T, D)          # (B, T, D)
 
     # --- Output projection ---
     out = A_merged @ Wo                                          # (B, T, D)
