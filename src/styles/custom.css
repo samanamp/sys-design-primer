@@ -1,4 +1,18 @@
-:root {
+code {
+    color: #f4a9a9;
+    font-family: monospace;
+    border: #424141;
+    border-width: thin;
+    border-color: #917d7d;
+    border-style: solid;
+}
+
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+    border-inline-start: 2px solid oklch(47.819% 0.08924 170.757);
+    padding-inline-start: 1rem;
+}
+
+/* :root {
     --sl-color-accent-low: #11261f;
     --sl-color-accent: #3fbf8f;
     --sl-color-accent-high: #9ff2cf;
@@ -13,7 +27,7 @@
     --sl-color-black: #121212;
 }
 
-/* Dark theme tuning */
+
 :root[data-theme='dark'] {
     --sl-color-bg: #121212;
     --sl-color-bg-nav: #151515;
@@ -29,30 +43,30 @@
     --sl-color-hairline-shade: rgba(255, 255, 255, 0.16);
 }
 
-/* Slightly warmer content area */
+
 main {
     background: #141414;
 }
 
-/* Sidebar softer than full black */
+
 .sidebar-pane,
 .right-sidebar {
     background: #151515;
 }
 
-/* Content cards / code blocks */
+
 pre,
 .expressive-code,
 code {
     border-radius: 10px;
 }
 
-/* Links */
+
 a {
     text-decoration-thickness: 1px;
 }
 
-/* Headings slightly softer */
+
 h1,
 h2,
 h3,
@@ -60,8 +74,8 @@ h4 {
     color: #f0f0f0;
 }
 
-/* Paragraph text */
+
 p,
 li {
     color: #d2d2d2;
-}
+} */
