@@ -16,9 +16,16 @@
     --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+} */
+
+.sl-heading-wrapper {
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
 
 .sl-markdown-content code:not(:where(.not-content *)) {
-    color: #30edc1;
+    color: #00bc54;
     font-family: monospace;
     border: #424141;
     border-width: thin;
@@ -26,13 +33,16 @@
     border-style: solid;
 }
 
-body.astro-bguv2lll {
-    color: #f8f8f7bf;
+.sl-markdown-content {
+    /* color: #f8f8f7bf; */
     font-family: var(--font-body);
-    font-size: 18px;
-    line-height: 1.75;
-    letter-spacing: -0.005em;
+    /* font-size: 18px; */
+    /* line-height: 1.75; */
+    /* letter-spacing: -0.005em; */
+
 }
+
+
 
 .sl-markdown-content blockquote:not(:where(.not-content *)) {
     border-inline-start: 2px solid oklch(47.819% 0.08924 170.757);
