@@ -9,7 +9,7 @@ export default defineConfig({
 		starlight({
 			plugins: [starlightThemeRapide()],
 			title: 'My Primers',
-			// customCss: ['./src/styles/custom.css'],
+			customCss: ['./src/styles/custom.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/samanamp/sys-design-primer' }],
 			sidebar: [
 				{
