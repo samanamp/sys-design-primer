@@ -1,10 +1,23 @@
-code {
-    color: #f4a9a9;
+/* code {
+    color: #30edc1;
     font-family: monospace;
     border: #424141;
     border-width: thin;
     border-color: #917d7d;
     border-style: solid;
+} */
+
+.sl-markdown-content code:not(:where(.not-content *)) {
+    color: #30edc1;
+    font-family: monospace;
+    border: #424141;
+    border-width: thin;
+    border-color: #917d7d;
+    border-style: solid;
+}
+
+body.astro-bguv2lll {
+    color: #f8f8f7bf;
 }
 
 .sl-markdown-content blockquote:not(:where(.not-content *)) {
