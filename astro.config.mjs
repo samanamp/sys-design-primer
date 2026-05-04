@@ -48,6 +48,10 @@ export default defineConfig({
 					label: '40min interviews',
 					autogenerate: { directory: '40-min-interview' },
 				},
+				{
+					label: 'prachub',
+					autogenerate: { directory: 'prachub-designs' },
+				},
 			],
 		}),
 	],
