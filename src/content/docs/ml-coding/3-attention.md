@@ -199,6 +199,8 @@ def mha_backward(dout, cache):
     # 4. Softmax backward (row-wise Jacobian-vector product, closed form)
     dS = P * (dP - (dP * P).sum(axis=-1, keepdims=True))         # (B, H, T, T)
 
+    if mask is not None:
+        dS = np.where(mask, dS, 0.0)
     # 5. S = (Q @ K^T) * scale
     dQh = scale * np.matmul(dS, Kh)                              # (B, H, T, d_k)
     dKh = scale * np.matmul(dS.swapaxes(-1, -2), Qh)             # (B, H, T, d_k)
