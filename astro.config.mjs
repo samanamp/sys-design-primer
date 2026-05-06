@@ -2,14 +2,36 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightThemeRapide from 'starlight-theme-rapide'
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 // https://astro.build/config
 export default defineConfig({
+	markdown: {
+		remarkPlugins: [remarkMath],
+		rehypePlugins: [rehypeKatex],
+	},
 	integrations: [
 		starlight({
 			plugins: [starlightThemeRapide()],
 			title: 'My Primers',
 			customCss: ['./src/styles/custom.css'],
+			head: [
+				{
+				tag: 'script',
+				attrs: {
+					src: '/src/scripts/hide-header-on-scroll.js',
+					defer: true,
+				},
+				},
+				{
+				tag: 'script',
+				attrs: {
+					src: '/src/scripts/zen-mode.js',
+					defer: true,
+				},
+				},
+			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/samanamp/sys-design-primer' }],
 			sidebar: [
 				{
