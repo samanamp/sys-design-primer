@@ -84,11 +84,12 @@ html.header-hidden header.header {
     color: var(--sl-color-white);
 
     cursor: pointer;
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+    box-shadow: 0px 0px 0px 0px rgb(94, 94, 94);
   }
 
   #zen-mode-toggle:hover {
     background: var(--sl-color-gray-6);
+    box-shadow: 0px 0px 19px 0px rgb(94, 94, 94);
   }
 }
 

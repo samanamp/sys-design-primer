@@ -7,7 +7,7 @@ function setZenMode(enabled) {
   const button = document.getElementById('zen-mode-toggle');
   if (button) {
     button.setAttribute('aria-pressed', String(enabled));
-    button.textContent = enabled ? '↙' : '🧐';
+    button.textContent = enabled ? '↙' : 'Φ';
     button.title = enabled ? 'Exit Zen mode' : 'Enter Zen mode';
   }
 }
@@ -16,7 +16,7 @@ function initZenMode() {
   const button = document.createElement('button');
   button.id = 'zen-mode-toggle';
   button.type = 'button';
-  button.textContent = '🧐';
+  button.textContent = 'Φ';
   button.title = 'Enter Zen mode';
   button.setAttribute('aria-label', 'Toggle Zen mode');
   button.setAttribute('aria-pressed', 'false');
