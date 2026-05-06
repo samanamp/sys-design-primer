@@ -148,4 +148,105 @@ A few cross-cutting things that interviewers consistently push on regardless of 
 - Anthropic interviews are reported as deliberately open-ended; the interviewer may not have a single correct answer in mind. They want to see how you think through an unsolved problem, not whether you reproduce a known architecture. So expect novel twists; don't pattern-match too hard.
 - The retrieval-under-pressure failure mode you identified from PI applies here too. Recommend doing 2–3 of these timed (50 min, whiteboard or excalidraw) before the screen, not just reading them. The one most worth drilling cold is #1 — it's the highest-frequency reported prompt and #2/#3 are extensions of it.
 
-Want me to build a worked solution for any of these, or package this as a markdown file for your prep notes?
+---
+## 2nd set
+
+## Category 1: Rate-Limiting / Quota / Concurrency Control
+
+**1. Distributed rate limiter**
+*"Design a global rate limiter for an API that serves 5M requests/sec across 3 regions. Per-user limits, per-API-key limits, fairness across noisy neighbors."*
+
+The canonical "do you understand distributed counters and consistency tradeoffs" question. Test of: local-vs-global enforcement, fail-open vs fail-closed policy, hot-key handling.
+
+**2. Distributed quota/budget enforcement**
+*"Design a system that enforces a monthly spending budget across many concurrent API consumers. Each request consumes a variable amount of the budget. Once the budget is exhausted, no further requests should succeed. Multi-region, low-latency."*
+
+A meatier variant — combines rate limiting with the harder problem of enforcing a *cumulative* limit that can't be approximated as easily as a rate.
+
+---
+
+## Category 2: Job Orchestration / Async Workflows
+
+**3. Distributed job queue / scheduler**
+*"Design a job processing system that handles 2B jobs/day with retry, scheduling, priority, and fair-share across tenants. Some jobs run for milliseconds, some for hours."*
+
+Tests: queueing primitives, delivery semantics, isolation, gang scheduling for big jobs, the head-of-line blocking problem.
+
+**4. Webhook delivery system**
+*"Design the system that delivers webhooks to customer endpoints — at-least-once delivery, exponential backoff, dead-lettering, isolation between fast and slow customers, signed payloads."*
+
+The classic Stripe-style question. Tests: per-tenant queueing, retry policy, the "one slow customer can't block others" problem.
+
+---
+
+## Category 3: Real-Time Data / Counting / Metrics
+
+**5. Real-time metrics / counting system**
+*"Design a system that counts events at scale — think view counts, like counts, ad impressions. 100B events/day, near-real-time read freshness, queries that aggregate across counters."*
+
+Tests: write-path aggregation, hot-counter handling, idempotency, the streaming pipeline.
+
+**6. Time-series / observability database**
+*"Design the storage and query layer for a metrics system: 10M points/sec ingest, 100M active series, queries from 'last 5 minutes one series' to 'last 30 days, sum 10K series.'"*
+
+Tests: cardinality, compression, query planning, index structure. More TSDB-flavored.
+
+---
+
+## Category 4: Pub/Sub, Notifications, Streaming
+
+**7. Notification / fan-out system**
+*"Design a notification system that delivers messages to users across web, mobile push, email, SMS. 100M users, support for personalized batching ('don't send more than 3 notifications/hour to a user'), preference management, retry."*
+
+Tests: fan-out, deduplication, per-user state, channel routing, the cross-channel-rate-limit problem.
+
+**8. Real-time pub/sub for collaborative apps**
+*"Design the real-time messaging layer for a collaborative app — think Figma-style multiplayer presence and document edits. Sub-100ms propagation, 100K concurrent rooms, rooms ranging from 2 to 1000 participants."*
+
+Tests: WebSocket fan-out, presence/heartbeat, ordering, the room-sharding problem.
+
+---
+
+## Category 5: Storage / Caching / Data Systems
+
+**9. Distributed cache / KV store**
+*"Design a distributed cache serving 10M ops/sec with sub-ms latency. Eviction, replication, hot-key mitigation, consistency model."*
+
+Tests: classical caching, replication topology, the hot-key problem, eviction policy under memory pressure.
+
+**10. Idempotency / deduplication system**
+*"Design the idempotency layer for a payments API. Clients send an idempotency key with each request; the system guarantees that a request with the same key is executed exactly once even across retries, network partitions, and our own restarts."*
+
+Tests: storage of idempotency keys, concurrent same-key handling, the partial-execution case (side-effect happened, response storage failed).
+
+---
+
+## Bonus — JD-Aligned Variants
+
+If Rajan does pick a question with ML-infra flavor (less likely given the description, but possible given the role):
+
+**11. Multi-tenant model serving (research-flavored)**
+*"Design an internal serving system for 200+ research model variants on a shared GPU pool. Variable load per model, fast checkpoint loading, hibernation of cold models, per-researcher cost attribution."*
+
+**12. Inference benchmarking harness**
+*"Design a system that benchmarks new model variants automatically — varying batch sizes, sequence lengths, hardware types — producing comparable performance numbers over months."*
+
+---
+
+## Prep strategy
+
+The safe play is to prepare cold on the 10 generalist questions above. Each has well-known patterns, but each has a depth of follow-up where staff signal lives:
+- The hot-key problem (in rate limiting, counting, caching, queueing — same shape, different domain)
+- Fail-open vs fail-closed policy (rate limiting, idempotency, webhook delivery)
+- Per-tenant isolation under noisy neighbor (every question on this list)
+- Multi-region eventual consistency (every question that has "global" in it)
+- Idempotency and exactly-once semantics (the universal hard problem)
+
+For each question, prep:
+1. The 1-minute "happy path" architecture
+2. The specific scaling math
+3. The 3-4 hardest follow-ups and how you'd handle them
+4. The failure modes and graceful degradation
+5. One thing you'd push back on in the prompt
+
+If you want, I can write the full staff-level prompt (in the format from your question bank) for any of these so you can practice cold against a strong reasoning model. Which 2-3 do you want me to start with?
