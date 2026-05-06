@@ -20,14 +20,14 @@ export default defineConfig({
 				{
 				tag: 'script',
 				attrs: {
-					src: './src/scripts/hide-header-on-scroll.js',
+					src: '/scripts/hide-header-on-scroll.js',
 					defer: true,
 				},
 				},
 				{
 				tag: 'script',
 				attrs: {
-					src: './src/scripts/zen-mode.js',
+					src: '/scripts/zen-mode.js',
 					defer: true,
 				},
 				},
