@@ -432,6 +432,49 @@ This is the most subtle part of the design. Let me draw it.
                               p99 ~1-2 s
 ```
 
+```
+CLIENT
+                                      │
+                               impression fires
+                                      │
+                                      ▼
+                         ┌────────────────────────┐
+                         │  LOCAL Kafka           │
+                         │  (within one region)   │
+                         │  topic: impressions.v1 │
+                         │  partitioned by        │
+                         │  cluster_id            │
+                         └────────────┬───────────┘
+                                      │
+                                      ▼
+                         ┌────────────────────────┐
+                         │  Flink job (regional)  │
+                         │  - dedup               │
+                         │  - viewability filter  │
+                         │  - fan-out to hierarchy│
+                         └────────────┬───────────┘
+                                      │
+                          ┌───────────┴───────────┐
+                          │                       │
+                          ▼                       ▼
+               ┌──────────────────┐   ┌────────────────────────┐
+               │ Regional         │   │  CROSS-REGION Kafka     │
+               │ Aerospike        │   │  (or MirrorMaker 2 /   │
+               │ counter store    │   │   Pulsar geo-rep)       │
+               │ (local writes)   │   │  topic: impressions     │
+               └──────────────────┘   │        .deduped.v1     │
+                                      └────────────┬───────────┘
+                                                   │
+                                      replicated to all other regions
+                                                   │
+                                      ┌────────────┴───────────┐
+                                      │                        │
+                                      ▼                        ▼
+                               EU-WEST Flink            AP-SE Flink
+                               (apply INCR to           (apply INCR to
+                                local Aerospike)         local Aerospike)
+```
+
 The way it works: each region is the authority for its own writes. When EU-West counts an impression, it writes locally and also publishes the event to the global Kafka topic. The other regions consume that topic and apply the same `INCR` to their local counters.
 
 Why publish *events* and not *counter values*? Because counters are commutative — every region applies every region's events, in any order, and they all converge to the same total. If we replicated the *value*, we'd have to deal with conflict resolution (whose value wins?), which is hard for counters. Replicating the *operation* sidesteps it.
