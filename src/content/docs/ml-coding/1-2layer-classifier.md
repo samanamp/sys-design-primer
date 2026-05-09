@@ -35,6 +35,86 @@ Then everything else is normal chain rule.”
 
 ---
 
+## Interview Q1
+```
+Perfect Accuracy ⇒ Loss Bounds – If a classifier achieves 100% accuracy on its training set, what are the minimum and maximum possible values of the cross-entropy loss on a single example ? (Hint: with perfect accuracy, the true class probability is 1, so loss can be arbitrarily low or high depending on confidence).
+```
+
+I would answer by first clarifying the assumption.
+
+For one example, cross-entropy is:
+
+$$
+L = -\log p_y
+$$
+
+where (p_y) is the model probability assigned to the true class.
+
+### Minimum possible loss
+
+If the model assigns probability 1 to the true class:
+
+$$
+p_y = 1
+$$
+
+then:
+
+$$
+L = -\log(1) = 0
+$$
+
+So the minimum is: 0
+
+### Maximum possible loss
+
+This depends on what we mean by “100% accuracy.”
+
+If prediction is based on **argmax of the softmax probabilities**, then the true class must have the highest probability.
+
+For (C) classes, the smallest possible winning probability is about:
+
+$$
+p_y \approx \frac{1}{C}
+$$
+
+So the largest loss while still being correct is approximately:
+
+$$
+-\log \frac{1}{C} = \log C
+$$
+
+Example for binary classification:
+
+$$
+p_y = 0.5001
+$$
+
+Correct prediction, but loss is:
+
+$$
+-\log(0.5001) \approx 0.693
+$$
+
+So for binary classification, max loss under correct argmax is about:
+
+$$
+\log 2
+$$
+
+### Important caveat
+
+If “accuracy” is computed from some separate hard prediction rule, not from the probability used in cross-entropy, then the loss could be arbitrarily high if $p_y \to 0$:
+
+$$
+-\log(p_y) \to \infty
+$$
+
+So my interview answer would be:
+
+> Minimum is 0, when the model puts probability 1 on the true class. If correctness is determined by softmax argmax over (C) classes, the maximum single-example loss while still correct is about (\log C). But if the hard prediction is decoupled from the probability used for cross-entropy, the loss can be arbitrarily large.
+
+
 ## 2. Gradients
 
 Forward:
