@@ -27,9 +27,9 @@ y:  (N,) integer class labels
 
 The key simplification is:
 
-[
+$$
 \frac{\partial L}{\partial Z_2} = \frac{softmax(Z_2) - onehot(y)}{N}
-]
+$$
 
 Then everything else is normal chain rule.”
 
