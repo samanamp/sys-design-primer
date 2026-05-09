@@ -165,11 +165,11 @@ def train_step(X, y, params, lr=1e-1):
 
 Use central difference:
 
-[
+$$
 \frac{\partial L}{\partial \theta_i}
 \approx
 \frac{L(\theta_i + h) - L(\theta_i - h)}{2h}
-]
+$$
 
 ```python
 def rel_error(a, b):
