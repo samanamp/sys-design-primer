@@ -8,11 +8,11 @@ I would say:
 
 “We have a 2-layer classifier:
 
-[
+$$
 X \rightarrow Z_1 = XW_1 + b_1 \rightarrow A_1 = ReLU(Z_1)
 \rightarrow Z_2 = A_1W_2 + b_2
 \rightarrow softmax \rightarrow CE
-]
+$$
 
 Let:
 
