@@ -1,5 +1,5 @@
 ---
-title: Idempotency Layer for a Payments API
+title: 10-Idempotency Layer for a Payments API
 description: Idempotency Layer for a Payments API
 ---
 

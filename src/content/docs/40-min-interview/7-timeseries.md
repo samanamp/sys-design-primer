@@ -1,5 +1,5 @@
 ---
-title: "Time-series / observability database"
+title: "6-Time-series / observability database"
 description: "Time-series / observability database"
 ---
 

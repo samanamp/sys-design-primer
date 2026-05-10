@@ -1,5 +1,5 @@
 ---
-title: "Distributed Cache"
+title: "9-Distributed Cache"
 description: Distributed Cache
 ---
 "Design a distributed cache serving 10M ops/sec with sub-ms latency. Eviction, replication, hot-key mitigation, consistency model."
