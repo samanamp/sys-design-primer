@@ -1,192 +1,152 @@
-/* code {
-    color: #30edc1;
-    font-family: monospace;
-    border: #424141;
-    border-width: thin;
-    border-color: #917d7d;
-    border-style: solid;
-} */
-
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700&display=swap');
 @import 'katex/dist/katex.min.css';
 
+/* ============================================================
+   Type system
+   - Set Starlight's own vars so the family applies site-wide
+     (sidebar, callouts, hero, etc.), not just markdown body.
+   ============================================================ */
 :root {
-    --font-body: "Source Serif 4", Georgia, serif;
+    /* UI chrome (sidebar, header, nav, callouts) stays sans for clarity. */
+    --sl-font: "IBM Plex Sans", Inter, system-ui, sans-serif;
+    --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* Serif reserved for the reading area — pulls the eye into the content. */
+    --font-body: "Source Serif 4", Georgia, "Iowan Old Style", serif;
     --font-heading: "IBM Plex Sans", Inter, system-ui, sans-serif;
-    --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    --font-code: var(--sl-font-mono);
+
+    /* Inline-code accent (kept green; tuned per theme below) */
+    --code-accent: #00b86a;
+    --code-bg: color-mix(in oklab, var(--code-accent) 12%, transparent);
+    --code-border: color-mix(in oklab, var(--code-accent) 28%, transparent);
 }
 
-/* code {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-} */
-
-.sl-heading-wrapper {
-    font-family: "IBM Plex Sans", system-ui, sans-serif;
+:root[data-theme='light'] {
+    /* Darker shade for AA contrast on light backgrounds */
+    --code-accent: #056e36;
 }
 
-.sl-markdown-content code:not(:where(.not-content *)) {
-    color: #00bc54;
-    font-family: monospace;
-    border: #424141;
-    border-width: thin;
-    border-color: #917d7d;
-    border-style: solid;
-}
-
+/* ============================================================
+   Long-form readability
+   ============================================================ */
 .sl-markdown-content {
-    /* color: #f8f8f7bf; */
     font-family: var(--font-body);
-    /* font-size: 18px; */
-    /* line-height: 1.75; */
-    /* letter-spacing: -0.005em; */
-
+    font-size: 1.125rem;
+    font-optical-sizing: auto;
+    font-feature-settings: "kern" 1, "liga" 1;
+    text-rendering: optimizeLegibility;
+    line-height: 1.55;
 }
 
+/* Source Serif 4 at 400 reads thin on dark backgrounds — bump to 430.
+   Variable font, so this is free (no extra weight file). */
+:root[data-theme='dark'] .sl-markdown-content {
+    font-weight: 430;
+}
 
+/* Tighten paragraph rhythm so blocks feel cohesive, not stacked. */
+.sl-markdown-content p {
+    margin-block: 0.85em;
+}
 
+/* Headings: sans, slightly tighter tracking, scroll-margin clears
+   the sticky header so anchor links land below it. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    scroll-margin-top: 5rem;
+}
+
+.sl-markdown-content :is(h2) {
+    margin-top: 2.5em;
+}
+
+/* Inline code: subtle tint + soft border, mono font.
+   :not(pre) > code keeps Expressive Code blocks untouched. */
+.sl-markdown-content :not(pre) > code:not(:where(.not-content *)) {
+    font-family: var(--font-code);
+    font-size: 0.9em;
+    padding: 0.1em 0.36em;
+    border-radius: 0.35em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    color: var(--code-accent);
+}
+
+/* Blockquote: keep the green accent family, italicize, soften text */
 .sl-markdown-content blockquote:not(:where(.not-content *)) {
-    border-inline-start: 2px solid oklch(47.819% 0.08924 170.757);
+    border-inline-start: 3px solid color-mix(in oklab, var(--code-accent) 80%, transparent);
     padding-inline-start: 1rem;
+    font-style: italic;
+    color: color-mix(in oklab, currentColor 85%, transparent);
 }
 
-/* Starlight top header */
+/* KaTeX: scroll long display equations on narrow viewports */
+.sl-markdown-content .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-block: 0.25em;
+}
+
+/* Selection in the accent family */
+::selection {
+    background: color-mix(in oklab, var(--code-accent) 30%, transparent);
+}
+
+/* ============================================================
+   Sticky header: hide on scroll-down, show on scroll-up
+   (driven by /scripts/hide-header-on-scroll.js)
+   ============================================================ */
 header.header {
-  transition: transform 180ms ease, opacity 180ms ease;
-  will-change: transform;
+    transition: transform 180ms ease, opacity 180ms ease;
+    will-change: transform;
 }
 
 html.header-hidden header.header {
-  transform: translateY(-100%);
-  opacity: 0;
+    transform: translateY(-100%);
+    opacity: 0;
 }
 
-/* Zen button hidden by default, visible only desktop/tablet+ */
+/* ============================================================
+   Zen mode toggle (driven by /scripts/zen-mode.js)
+   ============================================================ */
 #zen-mode-toggle {
-  display: none;
+    display: none;
 }
 
 @media (min-width: 1024px) {
-  #zen-mode-toggle {
-    position: fixed;
-    right: 1.25rem;
-    bottom: 1.25rem;
-    z-index: 9999;
+    #zen-mode-toggle {
+        position: fixed;
+        right: 1.25rem;
+        bottom: 1.25rem;
+        z-index: 9999;
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
 
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 999px;
-    border: 1px solid var(--sl-color-gray-5);
-    background: var(--sl-color-bg-nav);
-    color: var(--sl-color-white);
+        width: 2.75rem;
+        height: 2.75rem;
+        border-radius: 999px;
+        border: 1px solid var(--sl-color-gray-5);
+        background: var(--sl-color-bg-nav);
+        color: var(--sl-color-white);
 
-    cursor: pointer;
-    box-shadow: 0px 0px 0px 0px rgb(94, 94, 94);
-  }
+        cursor: pointer;
+        box-shadow: 0 0 0 0 rgb(94, 94, 94);
+        transition: box-shadow 180ms ease, background 180ms ease;
+    }
 
-  #zen-mode-toggle:hover {
-    background: var(--sl-color-gray-6);
-    box-shadow: 0px 0px 19px 0px rgb(94, 94, 94);
-  }
+    #zen-mode-toggle:hover {
+        background: var(--sl-color-gray-6);
+        box-shadow: 0 0 19px 0 rgb(94, 94, 94);
+    }
 }
 
 html.zen-mode .header,
 html.zen-mode #starlight__sidebar,
 html.zen-mode .right-sidebar-container {
-  display: none !important;
+    display: none !important;
 }
-
-/* html.zen-mode .header,
-html.zen-mode #starlight__sidebar,
-html.zen-mode .right-sidebar-container {
-  display: none !important;
-}
-
-html.zen-mode .main-frame {
-  padding-inline-start: 0 !important;
-  padding-top: 0 !important;
-}
-
-html.zen-mode .main-pane {
-  width: 100% !important;
-  --sl-content-margin-inline: auto;
-}
-html.zen-mode .sl-container {
-  max-width: var(--sl-content-width) !important;
-  margin-inline: auto !important;
-} */
-
-/* html.zen-mode .sl-container {
-  --sl-content-width: 70rem;
-} */
-
-/* :root {
-    --sl-color-accent-low: #11261f;
-    --sl-color-accent: #3fbf8f;
-    --sl-color-accent-high: #9ff2cf;
-
-    --sl-color-white: #e6e6e6;
-    --sl-color-gray-1: #cfcfcf;
-    --sl-color-gray-2: #b5b5b5;
-    --sl-color-gray-3: #8d8d8d;
-    --sl-color-gray-4: #5e5e5e;
-    --sl-color-gray-5: #3b3b3b;
-    --sl-color-gray-6: #2a2a2a;
-    --sl-color-black: #121212;
-}
-
-
-:root[data-theme='dark'] {
-    --sl-color-bg: #121212;
-    --sl-color-bg-nav: #151515;
-    --sl-color-bg-sidebar: #161616;
-    --sl-color-bg-inline-code: #1d1d1d;
-
-    --sl-color-text: #d8d8d8;
-    --sl-color-text-accent: #7ce0b4;
-    --sl-color-text-invert: #111;
-
-    --sl-color-hairline-light: rgba(255, 255, 255, 0.06);
-    --sl-color-hairline: rgba(255, 255, 255, 0.1);
-    --sl-color-hairline-shade: rgba(255, 255, 255, 0.16);
-}
-
-
-main {
-    background: #141414;
-}
-
-
-.sidebar-pane,
-.right-sidebar {
-    background: #151515;
-}
-
-
-pre,
-.expressive-code,
-code {
-    border-radius: 10px;
-}
-
-
-a {
-    text-decoration-thickness: 1px;
-}
-
-
-h1,
-h2,
-h3,
-h4 {
-    color: #f0f0f0;
-}
-
-
-p,
-li {
-    color: #d2d2d2;
-} */
