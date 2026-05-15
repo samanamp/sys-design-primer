@@ -222,7 +222,31 @@ Events that drive transitions:
 }
 ```
 
-**Storage substrate.** Postgres for the event log (transactional appends, indexed by `(workflow_id, seq_num)`, partitioned by tenant). Object store (S3-class) for large blobs — a 50K-token tool output goes to S3, the event holds a content-addressable pointer. Why not a single store? Postgres is great at small transactional rows but bad at multi-MB blobs (vacuum pain, replication lag); S3 is great at blobs but has eventual-consistency edges and 100ms+ latency that we don't want on the hot path for small events.
+**Storage substrate.** 
+```
+Hot event log:
+  DynamoDB / Cassandra / Scylla / Bigtable
+  key = tenant_id + workflow_id
+  sort key = seq_num
+
+Blob store:
+  S3/GCS for large tool outputs, traces, artifacts
+
+Analytical/audit store:
+  S3 + Parquet/Iceberg for long-term replay, debugging, cost analysis
+
+Relational DB:
+  Postgres only for metadata/control plane:
+    workflow status
+    tenant config
+    quotas
+    billing summaries
+    user permissions
+```
+
+
+
+[THIS IS WRONG-POSTGRES IS BAD FOR WRITE HEAVY WORKFLOWS] Postgres for the event log (transactional appends, indexed by `(workflow_id, seq_num)`, partitioned by tenant). Object store (S3-class) for large blobs — a 50K-token tool output goes to S3, the event holds a content-addressable pointer. Why not a single store? Postgres is great at small transactional rows but bad at multi-MB blobs (vacuum pain, replication lag); S3 is great at blobs but has eventual-consistency edges and 100ms+ latency that we don't want on the hot path for small events.
 
 ```
 Event log layout:
