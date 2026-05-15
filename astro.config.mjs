@@ -39,6 +39,13 @@ export default defineConfig({
 						defer: true,
 					},
 				},
+				{
+					tag: 'script',
+					attrs: {
+						src: '/scripts/fullscreen.js',
+						defer: true,
+					},
+				},
 			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/samanamp/sys-design-primer' }],
 			sidebar: [
