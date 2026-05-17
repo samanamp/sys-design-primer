@@ -63,6 +63,10 @@ export default defineConfig({
 					autogenerate: { directory: 'llm-sysdesign' },
 				},
 				{
+					label: 'Optimization',
+					autogenerate: { directory: 'optimization' },
+				},
+				{
 					label: 'Primers',
 					autogenerate: { directory: 'primers' },
 				},
