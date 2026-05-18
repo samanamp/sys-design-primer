@@ -12,7 +12,7 @@ description: "Distributed rate limiter"
 
 ## 1. Reframing
 
-A rate limit ("100 req/sec per user") and a cumulative budget ("$1000/month") look isomorphic but are architecturally distinct. **Rate limits self-heal at window boundaries; cumulative budget errors accumulate forever until reset.** If my regional counter is 15 requests stale at second boundary T, the limit re-enforces correctly at T+1. If a budget counter is $50 stale, that $50 is permanently over-spent until the month rolls.
+A rate limit (100 req/sec per user) and a cumulative budget (\$1000/month) look isomorphic but are architecturally distinct. **Rate limits self-heal at window boundaries; cumulative budget errors accumulate forever until reset.** If my regional counter is 15 requests stale at second boundary T, the limit re-enforces correctly at T+1. If a budget counter is \$50 stale, that \$50 is permanently over-spent until the month rolls.
 
 **[STAFF SIGNAL: rate-vs-cumulative]** This single observation justifies the entire architectural simplification. Local-region enforcement with bounded staleness is acceptable. Probabilistic counters (Count-Min Sketch) are acceptable. Fail-open is often acceptable. None of these are acceptable for cumulative budgets — those need leases, monotonic audit logs, and synchronous sub-budget allocation.
 
