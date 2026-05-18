@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex';
 
 // https://astro.build/config
 export default defineConfig({
+	devToolbar: { enabled: false },
 	markdown: {
 		remarkPlugins: [remarkMath],
 		rehypePlugins: [rehypeKatex],
@@ -18,18 +19,33 @@ export default defineConfig({
 			customCss: ['./src/styles/custom.css'],
 			head: [
 				{
-				tag: 'script',
-				attrs: {
-					src: '/scripts/hide-header-on-scroll.js',
-					defer: true,
-				},
+					tag: 'link',
+					attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
 				},
 				{
-				tag: 'script',
-				attrs: {
-					src: '/scripts/zen-mode.js',
-					defer: true,
+					tag: 'link',
+					attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
 				},
+				{
+					tag: 'script',
+					attrs: {
+						src: '/scripts/hide-header-on-scroll.js',
+						defer: true,
+					},
+				},
+				{
+					tag: 'script',
+					attrs: {
+						src: '/scripts/zen-mode.js',
+						defer: true,
+					},
+				},
+				{
+					tag: 'script',
+					attrs: {
+						src: '/scripts/fullscreen.js',
+						defer: true,
+					},
 				},
 			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/samanamp/sys-design-primer' }],
@@ -45,6 +61,10 @@ export default defineConfig({
 				{
 					label: 'LLM Sys Design',
 					autogenerate: { directory: 'llm-sysdesign' },
+				},
+				{
+					label: 'Optimization',
+					autogenerate: { directory: 'optimization' },
 				},
 				{
 					label: 'Primers',

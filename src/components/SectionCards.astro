@@ -1,0 +1,73 @@
+---
+import { getCollection } from 'astro:content';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+const LABELS: Record<string, string> = {
+  'llm-primers':      'LLM Primers',
+  'llm-sysdesign':    'LLM System Design',
+  'primers':          'Distributed Systems Primers',
+  'sysdesign':        'System Design',
+  'misc':             'Misc',
+  'ml-coding':        'Linear Algebra & Backprop',
+  'coding':           'Modern Coding',
+  '40-min-interview': '40-min Interviews',
+  'prachub-designs':  'PracHub Designs',
+};
+
+const DESCRIPTIONS: Record<string, string> = {
+  'llm-primers':      'Long-context LLMs, quantization, speculative decoding, attention variants, and context parallelism.',
+  'llm-sysdesign':    'Context management, KV caching, inference optimization, agentic workflows, distributed training, and vector DBs.',
+  'primers':          'Partitioning, replication, consensus, storage engines, caching, stream processing, analytical systems, and RPC.',
+  'sysdesign':        'Rate limiters, distributed counters, leader election, object stores, timeseries DBs, feature stores, and ML infra.',
+  'misc':             'Performance debugging and other miscellaneous topics.',
+  'ml-coding':        'Two-layer classifiers, MLPs, attention, FFN, KL divergence, and matrix calculus — from scratch.',
+  'coding':           'KV stores, in-memory spreadsheets, credit ledgers, web crawlers, serialization, and more.',
+  '40-min-interview': 'Rate limiters, distributed counters, caching, job schedulers, pub/sub, and notification systems.',
+  'prachub-designs':  'Deduplication, hosted notebooks, frequency capping, priority schedulers, and S3-style storage.',
+};
+
+const SKIP = new Set(['reference']);
+const SIDEBAR_ORDER = [
+  'llm-primers', 'llm-sysdesign', 'primers', 'sysdesign',
+  'misc', 'ml-coding', 'coding', '40-min-interview', 'prachub-designs',
+];
+
+const allEntries = await getCollection('docs');
+
+// Group by top-level directory, skip the root index and excluded dirs
+const groups = new Map<string, typeof allEntries>();
+for (const entry of allEntries) {
+  const dir = entry.id.split('/')[0];
+  if (dir === 'index' || SKIP.has(dir) || !entry.id.includes('/')) continue;
+  if (!groups.has(dir)) groups.set(dir, []);
+  groups.get(dir)!.push(entry);
+}
+
+// Sort each group's entries by id for a stable first-entry link
+for (const entries of groups.values()) {
+  entries.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+const cards = SIDEBAR_ORDER
+  .filter(dir => groups.has(dir))
+  .map(dir => {
+    const entries = groups.get(dir)!;
+    const first = entries[0];
+    return {
+      label:       LABELS[dir] ?? dir,
+      description: DESCRIPTIONS[dir] ?? `${entries.length} documents`,
+      href:        `/${first.id}/`,
+      count:       entries.length,
+    };
+  });
+---
+
+<CardGrid>
+  {cards.map(card => (
+    <LinkCard
+      title={card.label}
+      description={card.description}
+      href={card.href}
+    />
+  ))}
+</CardGrid>
