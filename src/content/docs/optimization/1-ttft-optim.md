@@ -1,6 +1,6 @@
 ---
-title: TTFT Optimization Program: 70B Chat
-description: TTFT Optimization Program: 70B Chat
+title: "TTFT Optimization Program: 70B Chat"
+description: "TTFT Optimization Program: 70B Chat"
 ---
 
 "We serve a chat product on a 70B-class model. TTFT (time-to-first-token) at p99 is currently 1.8 seconds. Product wants it under 500ms p99 within 2 quarters. You have 6 engineers. Walk me through your optimization program — what would you do, in what order, what would you measure, and what would you push back on?"
