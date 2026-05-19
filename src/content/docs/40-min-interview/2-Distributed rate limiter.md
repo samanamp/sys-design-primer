@@ -243,6 +243,8 @@ Each sub-key has its own GCRA TAT enforcing `limit/N`. A request hashes uniforml
 
 **[STAFF SIGNAL: layered-limit evaluation]** A single request triggers checks against: per-user, per-API-key, per-customer-org, per-endpoint. Sequential evaluation = 4 × hot-path latency. Unacceptable.
 
+**THIS IS WRONG, ALL KEYS RELATED TO APIKEY, USER-ID SHOULD EXIST ON THE SAME SHARD AND DECITION MAKING SHOULD BE ATOMIC. IT'S REDICULOUS TO HAVE ONE REQUEST DISPATCH 4X MORE REQUESTS**
+
 **Strategy**: parallel dispatch + short-circuit on local fast-path + composite keys for the most common combinations.
 
 ```
