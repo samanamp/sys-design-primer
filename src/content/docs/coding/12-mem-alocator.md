@@ -12,6 +12,37 @@ You own the entire region. You decide the metadata layout. No use of Python's ow
 
 ---
 
+```py
+ALIGN = 8
+
+class Allocator:
+    def __init__(self, cap):
+        self.mem = bytearray(cap)
+        self.blocks = [[0, cap, True]]  # sorted by offset: [off, size, is_free]
+
+    def malloc(self, n):
+        n = (n + ALIGN - 1) & ~(ALIGN - 1)
+        for i, b in enumerate(self.blocks):
+            if b[2] and b[1] >= n:
+                if b[1] > n:
+                    self.blocks.insert(i + 1, [b[0] + n, b[1] - n, True])
+                    b[1] = n
+                b[2] = False
+                return b[0]
+        return None
+
+    def free(self, off):
+        i = next(j for j, b in enumerate(self.blocks) if b[0] == off)
+        assert not self.blocks[i][2], "double free"
+        self.blocks[i][2] = True
+        if i + 1 < len(self.blocks) and self.blocks[i+1][2]:        # coalesce right
+            self.blocks[i][1] += self.blocks[i+1][1]; del self.blocks[i+1]
+        if i > 0 and self.blocks[i-1][2]:                            # coalesce left
+            self.blocks[i-1][1] += self.blocks[i][1]; del self.blocks[i]
+
+```
+
+
 # Bytearray Allocator — Three Iterations
 
 Single Python file, three monotonic refinements over a fixed `bytearray`. Block metadata lives in a Python dict keyed by offset, since the spec lets me skip the byte-packing chore and focus on policy.
