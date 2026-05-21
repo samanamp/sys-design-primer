@@ -1,6 +1,6 @@
 ---
-title: Rate limiter
-description: Rate limiter
+title: Memory allocator
+description: Memory allocator
 ---
 
 You're given a fixed memory region of capacity C bytes (model it as a Python `bytearray` of size C). Implement an allocator over it:
