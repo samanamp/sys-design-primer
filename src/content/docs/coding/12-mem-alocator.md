@@ -41,6 +41,49 @@ class Allocator:
             self.blocks[i-1][1] += self.blocks[i][1]; del self.blocks[i]
 
 ```
+With size bucketing:
+```py
+ALIGN = 8
+
+def bucket(sz):  # floor(log2(sz)); bucket i covers [2^i, 2^(i+1))
+    return max(0, sz.bit_length() - 1)
+
+class Allocator:
+    def __init__(self, cap):
+        self.mem = bytearray(cap)
+        self.blocks = [[0, cap, True]]                  # address-order: [off, size, free]
+        self.free = {bucket(cap): [0]}                  # bucket -> list of offsets
+
+    def malloc(self, n):
+        n = (n + ALIGN - 1) & ~(ALIGN - 1)
+        for b in range(bucket(n), max(self.free, default=-1) + 1):
+            for off in self.free.get(b, []):
+                i = next(j for j, blk in enumerate(self.blocks) if blk[0] == off)
+                if self.blocks[i][1] >= n:
+                    self.free[b].remove(off)
+                    blk = self.blocks[i]
+                    if blk[1] > n:
+                        rem = [blk[0] + n, blk[1] - n, True]
+                        self.blocks.insert(i + 1, rem)
+                        self.free.setdefault(bucket(rem[1]), []).append(rem[0])
+                        blk[1] = n
+                    blk[2] = False
+                    return blk[0]
+        return None
+
+    def free_(self, off):
+        i = next(j for j, b in enumerate(self.blocks) if b[0] == off)
+        assert not self.blocks[i][2], "double free"
+        self.blocks[i][2] = True
+        for j in (i + 1, i - 1):                        # coalesce right then left
+            if 0 <= j < len(self.blocks) and self.blocks[j][2]:
+                lo, hi = sorted([i, j])
+                self.free[bucket(self.blocks[j][1])].remove(self.blocks[j][0])
+                self.blocks[lo][1] += self.blocks[hi][1]
+                del self.blocks[hi]
+                i = lo
+        self.free.setdefault(bucket(self.blocks[i][1]), []).append(self.blocks[i][0])
+```
 
 
 # Bytearray Allocator — Three Iterations
