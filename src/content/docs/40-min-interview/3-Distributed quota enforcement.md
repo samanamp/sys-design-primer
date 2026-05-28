@@ -9,11 +9,11 @@ description: "Distributed quota enforcement"
 
 ## 1. Reframing
 
-This is not a rate limiter. **[STAFF SIGNAL: cumulative-vs-rate]** A rate limit — "100 req/sec" — is self-healing: errors at one window boundary do not propagate to the next. Local approximation works because each window is independent. A cumulative monthly budget — "spend $1000 by month-end" — accumulates errors that never reset. If five regions each leak $50 of overspend through stale local views, the customer is billed $250 over budget at month-end. There is no boundary that erases the error. That single property reshapes the architecture: the rate-limiter playbook does not transfer.
+This is not a rate limiter. **[STAFF SIGNAL: cumulative-vs-rate]** A rate limit — "100 req/sec" — is self-healing: errors at one window boundary do not propagate to the next. Local approximation works because each window is independent. A cumulative monthly budget — "spend \$1000 by month-end" — accumulates errors that never reset. If five regions each leak \$50 of overspend through stale local views, the customer is billed \$250 over budget at month-end. There is no boundary that erases the error. That single property reshapes the architecture: the rate-limiter playbook does not transfer.
 
 The central mechanism is **sub-budget allocation with leases [STAFF SIGNAL: sub-budget-allocation-as-central]**: divide the global budget into regional sub-budgets, enforce locally against each, have a coordinator periodically rebalance. This trades strict global correctness for low latency. The size of that trade is controlled by lease size — the central tuning knob.
 
-Over-spend tolerance is a **policy decision, not a bug [STAFF SIGNAL: over-spend-as-policy]**. Zero over-spend in a multi-region system requires synchronous global coordination on every request — ~150ms cross-region floor, incompatible with the latency target. Realistic systems commit to a bounded over-spend budget: "we will exceed customer budget by no more than $X under steady state, $Y under partition." That bound is per-tier: prepaid/free-tier customers get tighter enforcement (over-spend is non-recoverable revenue loss); postpaid/enterprise customers get looser enforcement (over-spend is captured in the next invoice).
+Over-spend tolerance is a **policy decision, not a bug [STAFF SIGNAL: over-spend-as-policy]**. Zero over-spend in a multi-region system requires synchronous global coordination on every request — ~150ms cross-region floor, incompatible with the latency target. Realistic systems commit to a bounded over-spend budget: "we will exceed customer budget by no more than \$X under steady state, $Y under partition." That bound is per-tier: prepaid/free-tier customers get tighter enforcement (over-spend is non-recoverable revenue loss); postpaid/enterprise customers get looser enforcement (over-spend is captured in the next invoice).
 
 Variable cost per request is the third reshaping force. We don't know cost until the request finishes — naive post-hoc decrement allows unbounded overshoot at the boundary; naive worst-case decrement denies legitimate requests. The architecture must explicitly handle reserve / commit / refund.
 
@@ -23,8 +23,8 @@ I am committing to: **[STAFF SIGNAL: scope negotiation]**
 
 - **Cardinality:** 1M customers total; ~10K active in any given second. Long-tail: top 1% generate 80% of traffic.
 - **QPS:** mean customer ~1 req/sec; whales ~1K req/sec; aggregate peak ~1M req/sec.
-- **Cost variance:** wide. LLM-style: $0.0001 (cached short response) to $10 (long completion with tools). Median ~$0.001. Worst-case-per-request ≈ 10⁵× median.
-- **Budget magnitude:** $5–$10,000/month. Free tier $5/month, hard cutoff.
+- **Cost variance:** wide. LLM-style: \$0.0001 (cached short response) to \$10 (long completion with tools). Median ~\$0.001. Worst-case-per-request ≈ 10⁵× median.
+- **Budget magnitude:** \$5–\$10,000/month. Free tier \$5/month, hard cutoff.
 - **Latency:** budget check adds <5ms p99 to request path. Synchronous global coordination (~50ms+) is incompatible.
 - **Regions:** 5 (us-east, us-west, eu-west, ap-southeast, ap-northeast).
 - **Settlement:** hybrid. Free/prepaid: hard cutoff, over-spend = platform loss. Postpaid enterprise: soft cutoff with grace, over-spend recoverable through invoicing.
@@ -59,12 +59,12 @@ CROSS-REGION REPLICATION
   → single replication stream per region pair handles it
 
 LEASE ECONOMICS (the central tuning math)
-  lease size L, whale spend rate R = $1/sec, 5 regions
+  lease size L, whale spend rate R = \$1/sec, 5 regions
   coordinator RTT/whale = R/L
-  L=$60  → 1 RTT/min,   max overshoot ≈ $300 across regions
-  L=$1   → 60 RTT/min,  max overshoot ≤ $5
+  L=\$60  → 1 RTT/min,   max overshoot ≈ \$300 across regions
+  L=\$1   → 60 RTT/min,  max overshoot ≤ \$5
   → adaptive L: large when remaining/rate > 1 hour;
-    shrinks linearly to $0 (synchronous mode) at exhaustion.
+    shrinks linearly to \$0 (synchronous mode) at exhaustion.
 ```
 
 ## 4. High-level architecture
@@ -128,16 +128,16 @@ Chosen: **token-bucket leases with adaptive sizing and demand-pull allocation.**
 ```
 Coordinator                     Regional enforcer (us-east)
 ─────────                       ─────────────────────────
-budget_total:    $1000          
-budget_granted:  $800           sub_budget_remaining: $40 of last $200 lease
-                                local_spend_since_lease: $160
+budget_total:    \$1000          
+budget_granted:  \$800           sub_budget_remaining: \$40 of last \$200 lease
+                                local_spend_since_lease: \$160
                                 lease_id: L7-9af3, expires: T+60s
-                                spend rate ≈ $5/sec → exhausts in 8s
+                                spend rate ≈ \$5/sec → exhausts in 8s
                                 
-        ◀─ lease_request(cust=C, lease=L7, used=$160,
-                         rate=$5/sec, ask=$200) ──
+        ◀─ lease_request(cust=C, lease=L7, used=\$160,
+                         rate=\$5/sec, ask=\$200) ──
         
-  coord checks: total - granted_to_others = $1000 - $600 = $400 free
+  coord checks: total - granted_to_others = \$1000 - \$600 = $400 free
         
         ── grant(lease_id=L8, size=$200, ttl=120s) ──▶
                                 
@@ -163,7 +163,7 @@ Adaptive lease sizing rule:
   L_max = remaining_budget / 10   (no region holds >10% of total)
 ```
 
-Over-spend bound ≈ `5 regions × L + replication_lag × spend_rate`. With $1 leases at exhaustion, bound ≈ $5–$10. With $60 leases mid-month, bound ≈ $300 — but $300 on a $10K postpaid budget is invisible noise.
+Over-spend bound ≈ `5 regions × L + replication_lag × spend_rate`. With \$1 leases at exhaustion, bound ≈ \$5–\$10. With \$60 leases mid-month, bound ≈ \$300 — but \$300 on a \$10K postpaid budget is invisible noise.
 
 **Reclaim mechanism.** Every 30s the coordinator polls regions for `(local_spend, lease_age, utilization)`. If a lease is >5 min old and <20% utilized, the coordinator forcibly reclaims unused portion. This is the "high-traffic region starves while low-traffic region hoards" mitigation. Without it, demand-pull degrades into hostage-budget over time as customer traffic patterns shift.
 
@@ -173,9 +173,9 @@ Over-spend bound ≈ `5 regions × L + replication_lag × spend_rate`. With $1 l
 
 **[STAFF SIGNAL: variable-cost reservation]** Variable cost destroys naive enforcement. Three rejected alternatives:
 
-- **Decrement after execution:** request executes, then deduct. Customer at $0.001 remaining + a $0.50 request = $0.499 over per request. Unbounded boundary overshoot. Rejected.
-- **Decrement worst-case before:** reserve the max possible cost. Customer at $1 remaining is denied a $0.001 request because reservation is $10. ~99% false-deny rate near exhaustion. Rejected.
-- **No reservation, accept overshoot:** fine when `max_cost ≪ budget`. For our spread ($10 max on $5 free tier = 200% overshoot possible), not fine. Rejected for our parameters.
+- **Decrement after execution:** request executes, then deduct. Customer at \$0.001 remaining + a \$0.50 request = \$0.499 over per request. Unbounded boundary overshoot. Rejected.
+- **Decrement worst-case before:** reserve the max possible cost. Customer at \$1 remaining is denied a \$0.001 request because reservation is \$10. ~99% false-deny rate near exhaustion. Rejected.
+- **No reservation, accept overshoot:** fine when `max_cost ≪ budget`. For our spread (\$10 max on \$5 free tier = 200% overshoot possible), not fine. Rejected for our parameters.
 
 **Chosen: reserve / execute / commit-refund with TTL.**
 
@@ -186,21 +186,21 @@ Over-spend bound ≈ `5 regions × L + replication_lag × spend_rate`. With $1 l
      est = predict_cost(params)           actual cost determined
      est = max(est, p95_for_params)         (e.g., output_tokens × price)
    
-   enforcer.reserve(cust, est=$0.40):
+   enforcer.reserve(cust, est=\$0.40):
      if sub_budget < est: REJECT
-     sub_budget -= $0.40
+     sub_budget -= \$0.40
      create reservation {
-       res_id: R-7f3, reserved: $0.40,
+       res_id: R-7f3, reserved: \$0.40,
        expires: T+30s, lease: L8 }
    ─ res_id ─▶ gateway
 
 3. COMMIT (success)                       4. AUTO-REFUND (crash)
                                           
-   actual = $0.05                         request crashed; res TTL fires
-   enforcer.commit(R-7f3, $0.05):         sweeper at T+30s:
-     refund = $0.40 - $0.05 = $0.35         sub_budget += $0.40
-     sub_budget += $0.35                    audit_log.append(crash=R-7f3)
-     audit_log.append(spend=$0.05)        no spend recorded; budget restored
+   actual = \$0.05                         request crashed; res TTL fires
+   enforcer.commit(R-7f3, \$0.05):         sweeper at T+30s:
+     refund = \$0.40 - \$0.05 = \$0.35         sub_budget += \$0.40
+     sub_budget += \$0.35                    audit_log.append(crash=R-7f3)
+     audit_log.append(spend=\$0.05)        no spend recorded; budget restored
 ```
 
 **The reservation invariant [STAFF SIGNAL: invariant-based thinking]:** every reservation either commits with actual cost or expires with full refund. A reservation cannot leak. Implementation: reservations live in the regional enforcer's KV with TTL; a 1s heartbeat sweeps expirations and credits sub-budgets back. If the sweeper itself dies, alarm fires on `outstanding_reservation_value / lease_size > 0.5`.
@@ -221,8 +221,8 @@ Per region maintains:
   own_spend(C)             // monotone-grows on local commits
   view_of(C, r')           // last-seen monotone value from r'
 
-On local commit of $a in region r:
-  own_spend(C) += $a
+On local commit of \$a in region r:
+  own_spend(C) += \$a
   emit replication event: (C, r, own_spend(C), ts)
 
 On replication-receive at r from r':
@@ -234,7 +234,7 @@ Region r's belief about global spend:
 
 **Replication mechanism:** per-customer spend deltas batched at 100ms intervals, pushed to a Kafka-style replication bus partitioned by `customer_id` (per-customer order preserved). Each region tails the bus and applies updates to its `view_of` map.
 
-**Replication lag budget:** within-region <10ms, cross-region p50 ~150ms, p99 ~500ms. With 1s batched replication, divergence ≤ `1s × per-region spend rate`. Whale at $10/sec → ~$10 staleness per region pair, ~$40 worst-case across the topology.
+**Replication lag budget:** within-region <10ms, cross-region p50 ~150ms, p99 ~500ms. With 1s batched replication, divergence ≤ `1s × per-region spend rate`. Whale at \$10/sec → ~\$10 staleness per region pair, ~\$40 worst-case across the topology.
 
 **Why not synchronous replication: [STAFF SIGNAL: rejected alternative]** writing 5× cross-region on every spend puts ~150ms RTT on the request path. Lag was paid into the data path; coordination cost was paid into the lease protocol (amortized over many requests). Explicit asymmetry.
 
@@ -392,10 +392,10 @@ Protocol:
 - **Denial debugging:** denied request returns
   ```
   HTTP 402 Payment Required
-  X-Budget-Spent: $987.43
-  X-Budget-Total: $1000.00
-  X-Budget-Remaining: $12.57
-  X-Request-Estimated-Cost: $15.00
+  X-Budget-Spent: \$987.43
+  X-Budget-Total: \$1000.00
+  X-Budget-Remaining: \$12.57
+  X-Request-Estimated-Cost: \$15.00
   X-Budget-Mode: strict
   X-Period-End: 2026-05-31T23:59:59Z
   body: { reason: "request would exceed monthly budget",
