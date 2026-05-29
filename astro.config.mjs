@@ -98,6 +98,10 @@ export default defineConfig({
 					label: 'prachub',
 					autogenerate: { directory: 'prachub-designs' },
 				},
+				{
+					label: 'Paper Mocks',
+					autogenerate: { directory: 'papers' },
+				},
 			],
 		}),
 	],
