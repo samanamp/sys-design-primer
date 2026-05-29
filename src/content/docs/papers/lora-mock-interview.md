@@ -1,6 +1,9 @@
 ---
 title: LoRA — Paper-to-Code Mock Interview
 description: A full combined mock for the "read a paper, explain the benefit, implement it in Colab" ML interview, using LoRA as the worked example.
+sidebar:
+  order: 7
+  label: LoRA
 ---
 
 > **Paper:** *LoRA: Low-Rank Adaptation of Large Language Models* — Hu et al., 2021. arXiv: [2106.09685](https://arxiv.org/abs/2106.09685)
@@ -8,6 +11,29 @@ description: A full combined mock for the "read a paper, explain the benefit, im
 > **Format:** Read the paper (~15 min) → explain the *real* benefit → implement the core idea in Colab → sanity-check it.
 >
 > **Companion notebook:** [`lora_mock.ipynb`](/notebooks/lora_mock.ipynb) (download) — toy task + a `LoRALinear` stub to fill in, plus verification cells. Or open it straight in [Google Colab](https://colab.research.google.com/) via *File → Upload notebook*. A reference solution is included at the bottom of this page.
+>
+> **Difficulty:** 🟡 Medium. The layer is ~10 lines; the subtlety is *why* `B` is zero-initialized and what the `α/r` scaling buys you.
+
+---
+
+## How to run this as a timed drill (~60 min)
+
+Treat this like the real thing. Set a timer and don't look at the answers below until each block is done.
+
+| Time | Block | What you produce |
+|------|-------|------------------|
+| 0:00–0:15 | **Read** (Part 0 method on the [real PDF](https://arxiv.org/abs/2106.09685)) | The core equation + the one table that proves the benefit |
+| 0:15–0:20 | **Explain the benefit** out loud (cover Part 2 without peeking) | 1-paragraph pitch + answers to "why B=0", "what's α/r", "when not to" |
+| 0:20–0:50 | **Implement** in Colab from the stub (Part 3) | A working `LoRALinear` + loss-goes-down on the toy task |
+| last 10 min | **Sanity-check** (Part 4) | All 6 checks passing, talked through out loud |
+
+### Self-grading rubric — "what good looks like"
+- ✅ Anchored at least one benefit claim to a **specific table** ("the rank ablation shows…"), not just the abstract.
+- ✅ Named the **tradeoff/limitation** unprompted, not only the upside.
+- ✅ Got `LoRALinear` running **without** copy-pasting — froze the base, zero-init'd B, projected down-then-up.
+- ✅ Wrote **at least 2 sanity checks** before being asked (shapes + "only A,B train").
+- ✅ Narrated decisions while coding instead of going silent.
+- ⚠️ Red flags: silent coding, summarizing the abstract instead of the contribution, forgetting to freeze the base, claiming a benefit with no number behind it.
 
 ---
 
@@ -33,7 +59,7 @@ Goal: have an opinion, not just a summary.
 
 ## Part 1 — Structured read of THIS paper
 
-Here's where to look in the LoRA paper specifically, mapped to the passes above.
+Here's what each pass should surface in the LoRA paper specifically: the summary and core idea come from Pass 2, the tables from the Pass 1 figure-skim confirmed in Pass 2, and the limitations from Pass 3.
 
 ### The 30-second summary (the "benefit")
 Fine-tuning a large model normally updates **all** weights — expensive to train and store (a full copy of the model per task). LoRA **freezes the pretrained weights** and injects a small pair of trainable low-rank matrices into each adapted layer. You train only those. Result:
@@ -43,17 +69,15 @@ Fine-tuning a large model normally updates **all** weights — expensive to trai
 - **Cheap task-switching** — swap a few MB of LoRA weights instead of shipping a whole fine-tuned model per task.
 
 ### The core idea (Method — read this carefully, you implement it)
-For a pretrained weight matrix `W₀ ∈ ℝ^(d×k)`, instead of learning a full update `ΔW`, constrain it to be **low-rank**:
+For a pretrained weight matrix $W_0 \in \mathbb{R}^{d \times k}$, instead of learning a full update $\Delta W$, constrain it to be **low-rank**:
 
-```
-ΔW = B · A        where  B ∈ ℝ^(d×r),  A ∈ ℝ^(r×k),  and  r ≪ min(d, k)
-```
+$$\Delta W = B A, \qquad B \in \mathbb{R}^{d \times r}, \; A \in \mathbb{R}^{r \times k}, \; r \ll \min(d, k)$$
 
 The adapted forward pass becomes:
 
-```
-h = W₀·x + ΔW·x = W₀·x + (B·A)·x · (α/r)
-```
+$$h = W_0\,x + \frac{\alpha}{r}\, B A\, x$$
+
+> **Convention note:** the math above uses column vectors ($W x$). The code below uses the PyTorch batch-first convention ($x W^\top$, with `x` of shape `(batch, in)`) — same operation, transposed. Keep the two straight when you talk through it.
 
 Key details (these are the things an interviewer probes):
 - **`r`** is the rank — the single most important hyperparameter. The paper shows surprisingly small `r` (even 1–4) works well.
@@ -156,34 +180,36 @@ class LoRALinear(nn.Module):
 - `self.scaling = alpha / r` — the decoupling knob from the paper.
 
 ### Minimal training loop (toy task)
-We give the model a fixed random "true" linear map to recover, then check the LoRA path can adapt a frozen (wrong) base toward it.
+The target is deliberately **the frozen base plus a rank-`r` delta** — i.e. a function that a rank-`r` LoRA update *can* represent. That's the honest test: it isolates whether the low-rank path can adapt the frozen base to a reachable target, so the loss should drive down to ~0. (If you instead chase a full-rank random target, a rank-4 update can't express it and the loss plateaus high — a misleading demo.)
 
 ```python
 torch.manual_seed(0)
 
-in_dim, out_dim = 64, 32
-layer = LoRALinear(in_dim, out_dim, r=4, alpha=8)
+in_dim, out_dim, r = 64, 32, 4
+layer = LoRALinear(in_dim, out_dim, r=r, alpha=8)
 
-# a synthetic target function the model must learn to approximate
-true_W = torch.randn(out_dim, in_dim)
+# Target = frozen base + a rank-r delta -> reachable by a rank-r LoRA update.
+with torch.no_grad():
+    delta = (torch.randn(out_dim, r) @ torch.randn(r, in_dim)) * 0.1
+    teacher_W = layer.base.weight + delta
 
+base_snapshot = layer.base.weight.clone()   # for sanity check 3 (taken BEFORE training)
 opt = torch.optim.Adam([p for p in layer.parameters() if p.requires_grad], lr=1e-2)
 
-for step in range(300):
+for step in range(500):
     x = torch.randn(128, in_dim)
-    y = x @ true_W.T
-    pred = layer(x)
-    loss = F.mse_loss(pred, y)
+    y = x @ teacher_W.T + layer.base.bias
+    loss = F.mse_loss(layer(x), y)
 
     opt.zero_grad()
     loss.backward()
     opt.step()
 
-    if step % 50 == 0:
-        print(f"step {step:3d}  loss {loss.item():.4f}")
+    if step % 100 == 0:
+        print(f"step {step:3d}  loss {loss.item():.5f}")
 ```
 
-You should see the loss drop steadily — proof the low-rank path is learning even though the base is frozen.
+The loss should fall toward ~0 — proof the low-rank path adapted the frozen base to the target without touching `W₀`.
 
 ---
 
@@ -215,13 +241,11 @@ print("OK: output == base output at initialization")
 ```
 
 ### Check 3 — The frozen base weight never changed during training
+This relies on `base_snapshot`, which we captured **before** the training loop above (capturing it after would compare the tensor to itself and pass trivially — proving nothing).
 ```python
-before = layer.base.weight.clone()
-# ... after the training loop above ...
-assert torch.equal(layer.base.weight, before), "base weight must not move!"
+assert torch.equal(layer.base.weight, base_snapshot), "base weight must not move!"
 print("OK: base weight unchanged after training")
 ```
-(In the notebook, snapshot `before` *prior* to the loop.)
 
 ### Check 4 — Shapes are right
 ```python
