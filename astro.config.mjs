@@ -67,6 +67,10 @@ export default defineConfig({
 					autogenerate: { directory: 'ml-breadth' },
 				},
 				{
+					label: 'ML Modeling Fundamentals',
+					autogenerate: { directory: 'ml-modeling-fundamentals' },
+				},
+				{
 					label: 'Optimization',
 					autogenerate: { directory: 'optimization' },
 				},
