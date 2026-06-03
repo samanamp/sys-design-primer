@@ -1,59 +1,63 @@
 ---
-title: "Diffusion for Autonomous Driving Simulation"
-description: "Interview-focused guide to using diffusion models for future scene and trajectory generation in autonomous driving simulation."
+title: "Diffusion for Simulation: A 1-Hour Interview Learning Session"
+description: "A practical one-hour lesson on using diffusion models for autonomous driving and robotics simulation: conditioning, controllability, rare scenarios, and evaluation."
 ---
 
-# Diffusion for Autonomous Driving Simulation
+# Diffusion for Simulation: A 1-Hour Interview Learning Session
 
-## 1. Interview-level intuition
+Companion notebook: [diffusion_for_simulation_colab.ipynb](/notebooks/diffusion_for_simulation_colab.ipynb)
 
-Autonomous driving simulation needs diverse, realistic, and controllable futures. Diffusion models are attractive because they can sample many plausible futures from the same initial scene.
+Diffusion for simulation is not just "generate a trajectory." It is:
 
-Given the same history:
+> Generate diverse, realistic, controllable futures that are useful for testing autonomy.
 
-- One car yields.
-- Another merges.
-- A pedestrian waits.
-- A cyclist turns.
-- A vehicle cuts in.
+For a simulation team, this is the difference between a model that predicts likely behavior and a model that can create useful scenarios.
 
-A deterministic model tends to average these. A diffusion model can sample them.
+## 0. One-hour plan
 
-In simulation, the goal is not just prediction accuracy. The goal is useful generated scenarios for testing planning, prediction, and autonomy behavior.
+```text
+0-10 min   What simulation needs: realism, diversity, controllability
+10-25 min  Conditional diffusion formulation
+25-40 min  Conditioning signals: map, history, lights, route, intent, language
+40-50 min  Rare scenario generation and guidance
+50-60 min  Metrics, debugging, and interview drills
+```
 
-## 2. Mathematical formulation
+---
 
-Let $c$ be conditioning context:
+## 1. Why you should care
 
-$$
-c = \{\text{map}, \text{agent history}, \text{traffic lights}, \text{route}, \text{intent}, \text{text prompt}\}
-$$
+Autonomous driving systems need to be tested on events that are rare in logs:
 
-Let $x_0$ be the future scene or trajectory to generate.
+- near-miss merge,
+- pedestrian hesitation,
+- vehicle cutting in,
+- red-light runner,
+- cyclist swerving,
+- occluded actor appearing,
+- unprotected left interaction.
 
-Conditional diffusion trains:
+Pure log replay gives realism but limited coverage. Hand-authored scenarios give control but may look artificial. Diffusion can sit between them: learned realism plus controlled variation.
 
-$$
-\mathcal{L} =
-\mathbb{E}_{x_0, c, t, \epsilon}
-\left[
-\|\epsilon - \epsilon_\theta(x_t,t,c)\|_2^2
-\right]
-$$
+Robotics has the same pattern. A manipulation policy needs diverse object poses, contact outcomes, and action sequences, not one averaged behavior.
 
-where:
+---
 
-$$
-x_t = \sqrt{\bar{\alpha}_t}x_0 + \sqrt{1-\bar{\alpha}_t}\epsilon
-$$
+## 2. Conditional diffusion formulation
 
-The model learns:
+Let:
 
 $$
-p_\theta(x_0 | c)
+c = \text{conditioning context}
 $$
 
-For trajectory generation:
+For driving:
+
+```text
+c = map + agent history + traffic lights + route + intent + optional prompt
+```
+
+Let:
 
 $$
 x_0 \in \mathbb{R}^{A \times T \times D}
@@ -63,70 +67,161 @@ where:
 
 - $A$ is number of agents.
 - $T$ is future timesteps.
-- $D$ might include $(x,y,\theta,v)$.
+- $D$ might be $(x,y,\theta,v)$.
 
-Conditioning can be injected through:
-
-- Concatenation.
-- Cross-attention.
-- Graph neural networks.
-- Map encoders.
-- Agent-history encoders.
-- Classifier-free guidance.
-
-Classifier-free guidance uses conditional and unconditional predictions:
+Noising:
 
 $$
-\hat{\epsilon} =
+x_t =
+\sqrt{\bar{\alpha}_t}x_0
++
+\sqrt{1-\bar{\alpha}_t}\epsilon
+$$
+
+Conditional denoising objective:
+
+$$
+\mathcal{L}
+=
+\mathbb{E}
+\left[
+\|\epsilon-\epsilon_\theta(x_t,t,c)\|_2^2
+\right]
+$$
+
+The model learns:
+
+$$
+p_\theta(x_0|c)
+$$
+
+That means: distribution over future scenes given the current scene.
+
+---
+
+## 3. Conditioning signals
+
+A simulation diffusion model is only useful if it understands context.
+
+### Map
+
+Map features tell the model what is physically and legally plausible:
+
+- lane centerlines,
+- lane boundaries,
+- crosswalks,
+- stop signs,
+- drivable area,
+- speed limits.
+
+### Agent history
+
+History tells intent and dynamics:
+
+- position,
+- velocity,
+- acceleration,
+- heading,
+- turn signal if available,
+- interaction history.
+
+### Traffic lights
+
+Traffic lights constrain behavior. A model that ignores lights may generate realistic-looking but invalid futures.
+
+### Route and intent
+
+Route conditions generation:
+
+```text
+same scene + route straight -> continue
+same scene + route left     -> turn left
+```
+
+Intent can be explicit:
+
+- "aggressive merge",
+- "yielding pedestrian",
+- "near-miss but no collision".
+
+### Language prompt
+
+Language can expose scenario controls to humans:
+
+```text
+"Generate a cyclist entering from the right behind occlusion."
+```
+
+This is powerful but harder to evaluate and constrain.
+
+---
+
+## 4. Controllability
+
+Controllability means the generated scenario follows requested constraints.
+
+Ways to control diffusion:
+
+1. **Conditioning:** feed route, intent, map, lights, text.
+2. **Classifier-free guidance:** increase conditioning strength.
+3. **Constraint filtering:** sample many, keep valid ones.
+4. **Cost-guided sampling:** push samples toward desired properties.
+5. **Post-processing:** repair small violations.
+
+Classifier-free guidance:
+
+$$
+\hat{\epsilon}
+=
 \epsilon_\theta(x_t,t,\varnothing)
-+ s \left[
-\epsilon_\theta(x_t,t,c) -
++
+s\left[
+\epsilon_\theta(x_t,t,c)
+-
 \epsilon_\theta(x_t,t,\varnothing)
 \right]
 $$
 
-where $s$ controls conditioning strength.
+where $s$ is guidance strength.
 
-## 3. Why this matters for autonomous driving simulation
+Tradeoff:
 
-Driving simulation needs more than replaying logs. It needs controlled variation:
+```text
+higher guidance -> more control, less diversity, possible artifacts
+lower guidance  -> more diversity, weaker control
+```
 
-- Same intersection, different pedestrian behavior.
-- Same merge, more aggressive vehicle.
-- Same route, rare cut-in.
-- Same scene, changed traffic light timing.
-- Same map, language instruction: "generate a near-miss merge."
+---
 
-Diffusion can help because:
+## 5. Long-tail and rare scenario generation
 
-- Sampling gives diversity.
-- Conditioning gives controllability.
-- Rare scenarios can be oversampled or guided.
-- Multi-agent futures can be generated jointly.
-- Generated scenarios can stress-test planners.
+Rare scenarios are why simulation matters.
 
-Tradeoffs:
+Diffusion can generate rare scenarios by:
 
-- High realism may reduce rare-event frequency.
-- Strong guidance may reduce realism.
-- More denoising steps increase latency.
-- Generated scenes need strict validity metrics.
+- conditioning on rare-event labels,
+- oversampling rare contexts during training,
+- using guidance toward risk metrics,
+- searching random seeds,
+- filtering generated samples,
+- training on mined hard examples.
 
-## 4. Common interview questions and strong answers
+But there is a trap:
 
-**Q: What would the conditioning input include?**  
-A: Map geometry, lanes, traffic light state, route, agent history, object types, velocities, interactions, and optional scenario intent or text prompt.
+> Rare is not the same as unrealistic.
 
-**Q: Why not just use a regression model?**  
-A: Regression with MSE tends to average multi-modal futures. Diffusion can sample diverse plausible futures from the same context.
+A useful rare scenario must be physically possible and map-compliant. A generated collision caused by teleporting actors is not useful.
 
-**Q: How do you make diffusion controllable?**  
-A: Condition on structured inputs like route or intent, use classifier-free guidance, filter samples with constraints, or add cost/guidance terms during sampling.
+For Waymo-style simulation thinking, always separate:
 
-**Q: How do you generate rare scenarios?**  
-A: Condition on rare-event labels or prompts, oversample rare contexts, guide toward risk metrics, or search over diffusion seeds and retain samples that meet criteria.
+- rarity,
+- realism,
+- safety relevance,
+- controllability.
 
-## 5. Minimal NumPy or PyTorch implementation
+---
+
+## 6. Minimal PyTorch implementation
 
 ```python
 import torch
@@ -134,9 +229,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class ConditionalDenoiser(nn.Module):
-    def __init__(self, traj_dim, cond_dim, hidden=128, steps=100):
+    def __init__(self, traj_dim, cond_dim, steps=100, hidden=128):
         super().__init__()
-        self.t_emb = nn.Embedding(steps, hidden)
+        self.time = nn.Embedding(steps, hidden)
         self.net = nn.Sequential(
             nn.Linear(traj_dim + cond_dim + hidden, hidden),
             nn.ReLU(),
@@ -146,11 +241,9 @@ class ConditionalDenoiser(nn.Module):
         )
 
     def forward(self, xt, t, cond):
-        # xt: [B, traj_dim], cond: [B, cond_dim]
-        emb = self.t_emb(t)
-        return self.net(torch.cat([xt, cond, emb], dim=-1))
+        return self.net(torch.cat([xt, cond, self.time(t)], dim=-1))
 
-def diffusion_loss(model, x0, cond, alpha_bar):
+def conditional_diffusion_loss(model, x0, cond, alpha_bar):
     B = x0.size(0)
     t = torch.randint(0, alpha_bar.numel(), (B,), device=x0.device)
     noise = torch.randn_like(x0)
@@ -158,52 +251,72 @@ def diffusion_loss(model, x0, cond, alpha_bar):
     xt = a.sqrt() * x0 + (1 - a).sqrt() * noise
     pred = model(xt, t, cond)
     return F.mse_loss(pred, noise)
-
-# Toy: one agent, 5 future steps, x/y => traj_dim = 10
-B, traj_dim, cond_dim, steps = 4, 10, 6, 100
-betas = torch.linspace(1e-4, 0.02, steps)
-alpha_bar = torch.cumprod(1 - betas, dim=0)
-model = ConditionalDenoiser(traj_dim, cond_dim, steps=steps)
-
-x0 = torch.randn(B, traj_dim)
-cond = torch.randn(B, cond_dim)
-loss = diffusion_loss(model, x0, cond, alpha_bar)
-loss.backward()
 ```
 
-## 6. Failure modes and debugging checklist
+In a real simulator, `cond` would not be a flat vector only. It may come from map encoders, agent encoders, graph networks, or cross-attention.
 
-- Model ignores conditioning.
-- Generated trajectories leave drivable area.
-- Agents collide unrealistically.
-- Rare scenarios are not generated.
-- Guidance creates unrealistic behavior.
-- Samples are diverse but low quality.
-- Samples are realistic but not controllable.
-- Denoising is too slow for target workflow.
+---
 
-Checklist:
+## 7. Metrics and debugging
 
-- Compare conditional vs shuffled-conditioning performance.
-- Measure collision/offroad/kinematic violations.
-- Plot multiple samples for same scene.
-- Track diversity and realism together.
-- Evaluate rare scenario recall.
-- Test different guidance strengths.
-- Use map-based validity checks.
+Generated scenarios need multiple metrics:
 
-## 7. A 60-second explanation I can say out loud
+- collision rate,
+- offroad rate,
+- wrong-way rate,
+- kinematic feasibility,
+- map compliance,
+- diversity,
+- controllability success,
+- realism score,
+- planner challenge rate,
+- rare-event coverage.
 
-For simulation, diffusion models learn a conditional distribution over future scenes or trajectories. The conditioning includes map, agent history, traffic lights, route, and possibly intent or language. During training, we add noise to the future trajectory and train the model to predict the noise given the noisy future and context. At generation time, we start from noise and denoise into a plausible future. This is useful because driving futures are multi-modal: the same scene can lead to yielding, merging, braking, or cutting in. Diffusion gives diversity, and conditioning gives controllability.
+Debugging checklist:
 
-## 8. 3 practice exercises with answers
+- Shuffle conditioning and check performance drops.
+- Change only traffic light state and inspect output.
+- Change only route and inspect output.
+- Plot many samples for one scene.
+- Measure collision and offroad.
+- Track diversity vs validity.
+- Check rare scenario generation rate.
 
-**Exercise 1:** What does $p_\theta(x_0|c)$ mean?  
-**Answer:** The model distribution over clean future scenes or trajectories $x_0$ conditioned on context $c$.
+---
 
-**Exercise 2:** How would you test whether the model uses traffic lights?  
-**Answer:** Change only the traffic light condition and see whether generated trajectories change appropriately; also test shuffled-light conditioning.
+## 8. Common interview questions and strong answers
 
-**Exercise 3:** What is the tradeoff in increasing guidance strength?  
-**Answer:** More controllability, but higher risk of unrealistic or low-diversity samples.
+**Q: Why diffusion for simulation instead of MSE trajectory prediction?**  
+A: Simulation needs a distribution over plausible futures. MSE gives one averaged future; diffusion can sample diverse futures from the same context.
+
+**Q: What do you condition on?**  
+A: Map, agent history, traffic lights, route, intent, actor types, and optionally language.
+
+**Q: How do you make rare scenarios?**  
+A: Condition on rare-event intent, oversample rare contexts, guide sampling toward risk metrics, and filter for physical validity.
+
+**Q: What is the main tradeoff in controllability?**  
+A: Stronger control can reduce diversity or realism. Weak control gives realistic samples that may not satisfy the requested scenario.
+
+---
+
+## 9. A 60-second explanation you can say out loud
+
+Diffusion for simulation learns a conditional distribution over future scenes. The conditioning includes map, agent history, traffic lights, route, and maybe intent or language. During training, I add noise to logged futures and train a network to predict the noise given the noisy future and context. At generation, I start from noise and denoise into a plausible future. This is useful because driving has many valid futures. The key production challenge is balancing realism, diversity, controllability, and safety relevance, especially for rare scenarios.
+
+---
+
+## 10. Practice exercises with answers
+
+**Exercise 1:** How would you test whether a model uses map conditioning?  
+**Answer:** Change or shuffle map features and measure degradation; visually inspect whether trajectories still follow lanes.
+
+**Exercise 2:** Why can strong guidance be bad?  
+**Answer:** It can force the requested behavior but reduce realism, diversity, or physical validity.
+
+**Exercise 3:** Name four conditioning inputs for driving simulation.  
+**Answer:** Map, agent history, traffic lights, route, intent/language.
+
+**Exercise 4:** Why is a generated collision not automatically useful?  
+**Answer:** It may be physically impossible or caused by invalid actor behavior.
 

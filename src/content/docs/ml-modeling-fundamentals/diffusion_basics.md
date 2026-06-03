@@ -1,64 +1,89 @@
 ---
-title: "Diffusion Basics for Modeling Interviews"
-description: "Interview-focused guide to the forward noise process, reverse denoising process, denoising objective, epsilon prediction, and DDPM intuition."
+title: "Diffusion Basics: A 1-Hour Interview Learning Session"
+description: "A practical one-hour lesson on DDPM-style diffusion: forward noising, reverse denoising, epsilon prediction, sampling, and implementation for modeling interviews."
 ---
 
-# Diffusion Basics for Modeling Interviews
+# Diffusion Basics: A 1-Hour Interview Learning Session
 
-## 1. Interview-level intuition
+Companion notebook: [diffusion_basics_colab.ipynb](/notebooks/diffusion_basics_colab.ipynb)
 
-A diffusion model learns to generate data by reversing a gradual noising process.
+Diffusion models look intimidating because papers introduce many symbols. For an interview, you need a clean mental model:
 
-Training has two views:
+> Diffusion training teaches a neural network to remove known Gaussian noise. Generation starts from noise and repeatedly denoises until a sample appears.
 
-1. Start with clean data.
-2. Add noise until it becomes almost pure Gaussian noise.
-3. Train a neural network to undo one noisy step.
+In autonomous driving simulation, the sample may be a future trajectory. In robotics, it may be an action sequence. In vision, it may be an image. The core math is the same.
 
-Generation runs backward:
+## 0. One-hour plan
 
-1. Start from random Gaussian noise.
-2. Repeatedly denoise.
-3. End with a realistic sample.
+```text
+0-10 min   Why diffusion exists: sampling multi-modal distributions
+10-20 min  Forward process: add Gaussian noise
+20-35 min  Reverse process: learn to denoise
+35-45 min  Why predict epsilon
+45-55 min  Minimal PyTorch implementation
+55-60 min  Interview answers and drills
+```
 
-For simulation, the sample might be a future trajectory, a full scene rollout, or a set of agent actions.
+By the end, you should be able to explain DDPM without paper-level detail, write the noising equation, implement the training loss, and explain why diffusion is useful for multi-modal future prediction.
 
-## 2. Mathematical formulation
+---
 
-Let $x_0$ be clean data. For example, $x_0$ might be a future trajectory:
+## 1. Why you should care
+
+Many ML models predict one answer. Driving futures are not like that. Given the same scene, a car may yield, merge, accelerate, or brake. A pedestrian may wait or cross.
+
+Diffusion models are useful because they model a distribution, not just a point estimate. Different random seeds can generate different plausible futures.
+
+You should care in interviews because diffusion tests three fundamentals:
+
+- Can you reason about probability distributions?
+- Can you explain a training objective from first principles?
+- Can you implement tensor code without getting lost in notation?
+
+---
+
+## 2. Forward noise process
+
+Let $x_0$ be clean data. For a trajectory, this might be:
 
 $$
 x_0 \in \mathbb{R}^{T \times 2}
 $$
 
-### Forward process
+where $T$ is future timesteps and each point is $(x,y)$.
 
-Diffusion gradually adds Gaussian noise:
+The forward process gradually adds Gaussian noise:
 
 $$
-q(x_t | x_{t-1}) = \mathcal{N}(\sqrt{1-\beta_t}x_{t-1}, \beta_t I)
+q(x_t|x_{t-1}) =
+\mathcal{N}(\sqrt{1-\beta_t}x_{t-1}, \beta_t I)
 $$
 
 where:
 
-- $t$ is the diffusion timestep.
-- $\beta_t$ is a small noise variance.
-- $I$ is the identity covariance.
+- $t$ is the diffusion step.
+- $\beta_t$ is the noise variance at step $t$.
+- $I$ is identity covariance.
 
 Define:
 
 $$
-\alpha_t = 1 - \beta_t
+\alpha_t = 1-\beta_t
 $$
 
-$$
-\bar{\alpha}_t = \prod_{s=1}^{t} \alpha_s
-$$
-
-Then we can sample noisy $x_t$ directly:
+and:
 
 $$
-x_t = \sqrt{\bar{\alpha}_t}x_0 + \sqrt{1-\bar{\alpha}_t}\epsilon
+\bar{\alpha}_t = \prod_{s=1}^{t}\alpha_s
+$$
+
+The useful shortcut is:
+
+$$
+x_t =
+\sqrt{\bar{\alpha}_t}x_0
++
+\sqrt{1-\bar{\alpha}_t}\epsilon
 $$
 
 where:
@@ -67,72 +92,94 @@ $$
 \epsilon \sim \mathcal{N}(0,I)
 $$
 
-### Reverse process
+This says: noisy sample equals clean signal plus Gaussian noise. As $t$ increases, $\bar{\alpha}_t$ shrinks, so signal decreases and noise increases.
 
-The model learns to denoise:
+```text
+x0 clean trajectory
+   |
+   | add small noise
+   v
+x1 slightly noisy
+   |
+   v
+...
+   |
+   v
+xT almost Gaussian noise
+```
+
+---
+
+## 3. Reverse denoising process
+
+Generation runs backward:
+
+```text
+random noise xT
+   |
+   | denoise
+   v
+xT-1
+   |
+   v
+...
+   |
+   v
+x0 generated sample
+```
+
+The model learns:
 
 $$
 p_\theta(x_{t-1}|x_t)
 $$
 
-Instead of predicting $x_{t-1}$ directly, DDPM-style models often predict the noise:
+In practice, many DDPM-style models predict the noise that was added:
 
 $$
-\epsilon_\theta(x_t, t)
+\epsilon_\theta(x_t,t)
 $$
 
 Training objective:
 
 $$
-\mathcal{L} = \mathbb{E}_{x_0,t,\epsilon}
+\mathcal{L}
+=
+\mathbb{E}_{x_0,t,\epsilon}
 \left[
-\|\epsilon - \epsilon_\theta(x_t,t)\|_2^2
+\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2
 \right]
 $$
 
-### Why predict epsilon?
+This is just MSE between true noise and predicted noise.
 
-Predicting $\epsilon$ works well because:
+---
 
-- The target noise has a simple standard Gaussian distribution.
-- The same network learns denoising across noise levels.
-- It gives a stable MSE objective.
-- Once we know the noise, we can estimate the clean sample:
+## 4. Why predict epsilon?
+
+Predicting noise is convenient because noise has a simple distribution:
+
+$$
+\epsilon \sim \mathcal{N}(0,I)
+$$
+
+The target is normalized and stable across data domains. If the model predicts $\epsilon$, we can recover an estimate of $x_0$:
 
 $$
 \hat{x}_0 =
-\frac{x_t - \sqrt{1-\bar{\alpha}_t}\epsilon_\theta(x_t,t)}
+\frac{x_t-\sqrt{1-\bar{\alpha}_t}\epsilon_\theta(x_t,t)}
 {\sqrt{\bar{\alpha}_t}}
 $$
 
-## 3. Why this matters for autonomous driving simulation
+Interview answer:
 
-Driving futures are multi-modal. Diffusion models can represent complex distributions because generation starts from random noise. Different noise samples can produce different plausible futures.
+> Predicting epsilon turns denoising into a supervised regression problem with a standardized target. Once I know the noise, I can algebraically estimate the clean sample.
 
-For simulation, this is useful for:
+There are other parameterizations, such as predicting $x_0$ or velocity $v$, but epsilon prediction is the easiest to explain and implement.
 
-- Generating diverse future trajectories.
-- Sampling rare but plausible interactions.
-- Producing scene-level variations.
-- Conditioning generation on maps, agents, and traffic rules.
+---
 
-Compared with a deterministic MSE model, diffusion can generate multiple realistic outcomes instead of one averaged trajectory.
-
-## 4. Common interview questions and strong answers
-
-**Q: What is the forward process?**  
-A: It is a fixed process that gradually corrupts clean data with Gaussian noise according to a noise schedule.
-
-**Q: What does the neural network learn?**  
-A: It learns the reverse process. In DDPM-style training, it usually predicts the noise that was added to the clean sample.
-
-**Q: Why predict noise instead of the clean sample?**  
-A: Noise has a simple normalized target distribution, and the objective is stable. Once predicted, the clean sample can be recovered algebraically.
-
-**Q: Why is diffusion good for multi-modal prediction?**  
-A: The generation process starts from random noise, so the same conditioning input can produce many plausible outputs.
-
-## 5. Minimal NumPy or PyTorch implementation
+## 5. Minimal PyTorch implementation
 
 ```python
 import torch
@@ -140,19 +187,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 def q_sample(x0, t, noise, alpha_bar):
-    """
-    x0: [B, D]
-    t: [B] integer timesteps
-    noise: [B, D]
-    alpha_bar: [num_steps]
-    """
     a = alpha_bar[t].view(-1, 1)
     return a.sqrt() * x0 + (1.0 - a).sqrt() * noise
 
 class TinyDenoiser(nn.Module):
-    def __init__(self, dim, hidden=64, num_steps=100):
+    def __init__(self, dim, steps=100, hidden=64):
         super().__init__()
-        self.time_emb = nn.Embedding(num_steps, hidden)
+        self.time = nn.Embedding(steps, hidden)
         self.net = nn.Sequential(
             nn.Linear(dim + hidden, hidden),
             nn.ReLU(),
@@ -160,15 +201,15 @@ class TinyDenoiser(nn.Module):
         )
 
     def forward(self, xt, t):
-        emb = self.time_emb(t)
-        return self.net(torch.cat([xt, emb], dim=-1))
+        return self.net(torch.cat([xt, self.time(t)], dim=-1))
 
-B, D, steps = 8, 4, 100
+steps = 100
 betas = torch.linspace(1e-4, 0.02, steps)
 alphas = 1.0 - betas
 alpha_bar = torch.cumprod(alphas, dim=0)
 
-model = TinyDenoiser(D, num_steps=steps)
+B, D = 32, 4
+model = TinyDenoiser(D, steps)
 x0 = torch.randn(B, D)
 t = torch.randint(0, steps, (B,))
 noise = torch.randn_like(x0)
@@ -179,37 +220,96 @@ loss = F.mse_loss(pred_noise, noise)
 loss.backward()
 ```
 
-## 6. Failure modes and debugging checklist
+This is the core training loop.
 
-- Noise schedule too aggressive or too weak.
-- Time embedding not used correctly.
-- Model predicts wrong target: noise vs clean sample mismatch.
-- Tensor shapes broadcast incorrectly.
-- Loss decreases but samples are poor because sampling code is wrong.
-- Too few denoising steps for quality target.
-- Conditioning information ignored.
+---
+
+## 6. Autonomous driving and robotics interpretation
+
+For driving:
+
+```text
+x0 = future trajectory or future scene
+c  = map + agent history + traffic lights + route
+```
+
+For robotics:
+
+```text
+x0 = action sequence
+c  = camera/state observation + task instruction
+```
+
+Diffusion learns a conditional distribution:
+
+$$
+p_\theta(x_0|c)
+$$
+
+The basic loss becomes:
+
+$$
+\|\epsilon-\epsilon_\theta(x_t,t,c)\|_2^2
+$$
+
+The conditioning $c$ is what makes generation useful rather than random.
+
+---
+
+## 7. Failure modes and debugging checklist
+
+- Timestep embedding is missing or broken.
+- Noise schedule is too aggressive.
+- Tensor broadcasting silently wrong.
+- Model predicts $x_0$ but loss compares to epsilon.
+- Sampling code does not match training parameterization.
+- Model ignores conditioning.
+- Training loss goes down but samples are bad.
 
 Checklist:
 
-- Verify $x_t$ becomes noisier as $t$ increases.
-- Overfit a tiny dataset.
-- Check predicted noise shape and scale.
-- Plot denoised samples during training.
-- Test one reverse step independently.
-- Confirm timestep indexing is correct.
+- Plot $x_t$ at low, medium, high timesteps.
+- Verify $x_t$ becomes noise as $t$ increases.
+- Overfit 32 examples.
+- Print tensor shapes.
+- Compare predicted noise scale to true noise scale.
+- Test one denoising step before full sampling.
 
-## 7. A 60-second explanation I can say out loud
+---
 
-A diffusion model learns to reverse a noising process. During training, we take clean data, choose a timestep, add a known amount of Gaussian noise, and train a network to predict the noise that was added. The key formula is $x_t=\sqrt{\bar{\alpha}_t}x_0+\sqrt{1-\bar{\alpha}_t}\epsilon$. If the model predicts $\epsilon$, we can estimate the clean sample. At generation time, we start from random noise and repeatedly denoise. This is useful for driving simulation because one scene can have many plausible futures, and different noise samples can generate different futures.
+## 8. Common interview questions and strong answers
 
-## 8. 3 practice exercises with answers
+**Q: What is the forward process?**  
+A: A fixed process that gradually adds Gaussian noise to clean data using a known noise schedule.
 
-**Exercise 1:** What happens to $x_t$ as $\bar{\alpha}_t$ approaches zero?  
-**Answer:** The clean signal vanishes and $x_t$ becomes mostly Gaussian noise.
+**Q: What does the network learn?**  
+A: It learns the reverse denoising process. In DDPM training, it often predicts the noise added to $x_0$.
 
-**Exercise 2:** Why is timestep conditioning needed?  
-**Answer:** The denoising task is different at low noise and high noise, so the model must know the noise level.
+**Q: Why is diffusion good for multi-modal prediction?**  
+A: Generation starts from random noise, so the same conditioning input can produce multiple plausible samples.
 
-**Exercise 3:** If the model predicts $\epsilon_\theta$, how do you estimate $x_0$?  
-**Answer:** $\hat{x}_0=(x_t-\sqrt{1-\bar{\alpha}_t}\epsilon_\theta)/\sqrt{\bar{\alpha}_t}$.
+**Q: Why predict epsilon?**  
+A: Epsilon is standardized Gaussian noise, which is a stable regression target, and predicting it lets us reconstruct the clean sample.
+
+---
+
+## 9. A 60-second explanation you can say out loud
+
+A diffusion model learns to reverse a noising process. During training, I take clean data $x_0$, choose a timestep $t$, add Gaussian noise using $x_t=\sqrt{\bar{\alpha}_t}x_0+\sqrt{1-\bar{\alpha}_t}\epsilon$, and train a network to predict the noise $\epsilon$. At generation time, I start from Gaussian noise and repeatedly denoise. Predicting epsilon is common because the target is normalized and easy to regress. For driving simulation, this is useful because one scene can have many plausible futures, and different noise samples can generate different trajectories.
+
+---
+
+## 10. Practice exercises with answers
+
+**Exercise 1:** What happens as $\bar{\alpha}_t \to 0$?  
+**Answer:** The clean signal disappears and $x_t$ becomes mostly Gaussian noise.
+
+**Exercise 2:** Why does the model need timestep $t$?  
+**Answer:** Denoising a lightly corrupted sample is different from denoising almost pure noise.
+
+**Exercise 3:** Write the epsilon training objective.  
+**Answer:** $\mathbb{E}\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2$.
+
+**Exercise 4:** Why is diffusion slower than one-shot regression?  
+**Answer:** Sampling usually requires many denoising steps instead of one forward pass.
 
