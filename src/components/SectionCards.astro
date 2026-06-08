@@ -5,6 +5,7 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 const LABELS: Record<string, string> = {
   'llm-primers':      'LLM Primers',
   'llm-sysdesign':    'LLM System Design',
+  'diffusion':        'Diffusion',
   'primers':          'Distributed Systems Primers',
   'sysdesign':        'System Design',
   'misc':             'Misc',
@@ -17,6 +18,7 @@ const LABELS: Record<string, string> = {
 const DESCRIPTIONS: Record<string, string> = {
   'llm-primers':      'Long-context LLMs, quantization, speculative decoding, attention variants, and context parallelism.',
   'llm-sysdesign':    'Context management, KV caching, inference optimization, agentic workflows, distributed training, and vector DBs.',
+  'diffusion':        'Diffusion and world-model interview map: DDPM, solvers, tokenizers, DiT, flow matching, and AV architectures.',
   'primers':          'Partitioning, replication, consensus, storage engines, caching, stream processing, analytical systems, and RPC.',
   'sysdesign':        'Rate limiters, distributed counters, leader election, object stores, timeseries DBs, feature stores, and ML infra.',
   'misc':             'Performance debugging and other miscellaneous topics.',
@@ -28,7 +30,7 @@ const DESCRIPTIONS: Record<string, string> = {
 
 const SKIP = new Set(['reference']);
 const SIDEBAR_ORDER = [
-  'llm-primers', 'llm-sysdesign', 'primers', 'sysdesign',
+  'llm-primers', 'llm-sysdesign', 'diffusion', 'primers', 'sysdesign',
   'misc', 'ml-coding', 'coding', '40-min-interview', 'prachub-designs',
 ];
 

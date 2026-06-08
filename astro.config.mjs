@@ -63,6 +63,10 @@ export default defineConfig({
 					autogenerate: { directory: 'llm-sysdesign' },
 				},
 				{
+					label: 'Diffusion',
+					autogenerate: { directory: 'diffusion' },
+				},
+				{
 					label: 'ML Breadth',
 					autogenerate: { directory: 'ml-breadth' },
 				},
