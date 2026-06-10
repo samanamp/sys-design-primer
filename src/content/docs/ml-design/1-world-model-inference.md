@@ -286,7 +286,64 @@ If the question is "does the planner merge correctly," object-level sim answers 
 
 ---
 
-## 10. Summary — what I'd want the interviewer to remember
+## 10. Deep dives — where an inference interviewer will drill
+
+Three places a runtime-optimization interviewer will push past the headline numbers. Each is also a chance to show the *second-order* reasoning.
+
+### 10.1 The FLOPs the napkin math dropped: attention
+
+Section 3 counted only weight matmuls (2 × params × tokens) — the standard LLM habit. A sharp interviewer asks: what about attention? At video context lengths it is **not** a rounding error:
+
+```
+Full spatiotemporal attention, per denoise pass
+(12K current-frame tokens attending to a 144K-token window,
+ d_model 3072, 28 layers):
+
+  QKᵀ + AV ≈ 4 × 12e3 × 144e3 × 3072  ≈ 2.1e13 FLOPs/layer
+  × 28 layers                          ≈ 5.9e14 FLOPs
+  weight matmuls (from §3)             ≈ 0.7e14 FLOPs
+  → attention = ~8× the matmuls. The §5 cost model would be off ~9×.
+```
+
+What rescues it is **factorized attention**, standard in video DiTs: *spatial* attention within each frame, *temporal* attention across the window at each spatial location — never full all-to-all over space×time:
+
+```
+  spatial:  per camera 3.6K × 3.6K, ×(3 cams + lidar), ×28  ≈ 1.5e13
+  temporal: 12K queries × 12-frame depth, ×28               ≈ 5e10 (noise)
+  → attention back to a ~20% tax on matmuls; §5 conclusions hold.
+```
+
+Trade-off: factorization weakens long-range space-time coupling (an agent moving fast across views in one tick); the common compromise is a few full-attention layers in an otherwise factorized stack — and *which* layers stay full-attention is a quality/latency knob you tune with the eval harness, not a fixed property of the model.
+
+**Staff-level signal:** "transformer cost = 2·N·T" is an LLM-serving instinct. Know which regime you're in: at video sequence lengths, the attention pattern *is* a serving decision, and quoting per-mile costs without stating the attention structure is a ~9× error bar.
+
+### 10.2 FP8 on a DiT — what actually breaks
+
+FP8 gives ~2× tensor-core throughput and halves memory and wire bytes (it's load-bearing in both the §5 cost model and the TP comms math). The drill-down is *where it's unsafe*:
+
+- **AdaLN modulation** — the conditioning pathway (timestep + action embeddings → per-layer scale/shift). Tiny tensors with huge dynamic range; quantizing them is all risk, no win. Keep BF16.
+- **First and last blocks** — input patchify and the final projection back to latents. Output-layer quantization error shows up as visible banding/texture artifacts after VAE decode. Keep high precision; it's a few % of FLOPs.
+- **Attention internals** — softmax and accumulators stay FP32 inside FlashAttention regardless; FP8 applies to the projections.
+- **Everything else** — the QKVO and MLP GEMMs, ~95% of FLOPs — quantizes well with per-channel weight scales and delayed/dynamic activation scaling.
+
+**Staff-level signal:** quantization error is **slice-biased**. Night and heavy-rain frames occupy a narrow band of the value distribution, so a global scale gives them *larger relative error* — the quantized model degrades most on exactly the safety-critical slices. Two consequences: the calibration set must be slice-stratified (not a random sample of sunny miles), and FP8 ships through the same per-slice agreement gates as a distilled model, even though it "didn't change the weights."
+
+### 10.3 Branch fanout is memory-bound, not compute-bound
+
+Counterfactual branching (§6) shares the past via copy-on-write state blocks — one block = one frame's KV ≈ 12K tokens × 57 KB ≈ **0.7 GB** (FP8). The natural question: how wide can you fan out per GPU?
+
+```
+Steady state, branches fully diverged (each holds its own 12-frame window):
+  per-branch window: 12 × 0.7 GB ≈ 8.2 GB
+  H100 80 GB − ~4 GB weights      → ~9 fully-diverged branches/GPU
+  (compute would happily batch 9 branches — HBM runs out first)
+```
+
+So the levers are memory levers: frame-block CoW with refcounts (branches pay only for divergent *suffix* frames, so shallow fanouts are much wider than 9), harder temporal compression of older frames, spilling cold branches to CPU and prefetching at fork-resume. And one free gift this workload gives you: **every tick has an identical shape** (12K tokens, fixed window — no ragged sequence lengths like LLM serving), so CUDA graphs capture-once-replay-forever and static batch slots work perfectly; rollouts joining and leaving just swap into fixed slots between ticks.
+
+**Staff-level signal:** state the binding constraint before optimizing. Fanout looks like a compute-scheduling problem; the arithmetic says it's an HBM-capacity problem, and the design answer (CoW blocks + eviction tiers) follows from that, not from FLOPs.
+
+## 11. Summary — what I'd want the interviewer to remember
 
 1. **Napkin math first**: 12K tokens / 100 ms kills naive AR; $36/mile kills serving the teacher. The design is forced by arithmetic, not preference.
 2. **Two SLOs, two pools**: throughput (miles/GPU-hr) for the bulk fleet, latency only where a human/hardware is in the loop. Sim-time ≠ wall-clock.
