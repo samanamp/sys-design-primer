@@ -182,7 +182,14 @@ Operating notes:
 
 ---
 
-## 8. Summary — what I'd want the interviewer to remember
+## 8. Research pass — new developments (as of June 2026)
+
+- **The sharpness-vs-tail trade now has a published mitigation:** [rCM](https://arxiv.org/abs/2510.08431) (NVIDIA, ICLR 2026) regularizes continuous-time consistency distillation with a score term — matching DMD2's quality while *explicitly mitigating mode collapse* and improving diversity, at 1–4 steps (15–50× sampling speedup), scaled to 10B+ video models. This is §2's footnote-1 tension, solved-ish in the literature: the frontier answer is consistency/score *hybrids*, not a pick between the adversarial and consistency columns.
+- **Distillation training itself got cheaper:** SGMD (May 2026) reports ~3× training speedup over DMD2 with better motion dynamics in 4-step students — relevant to §3's economics, though data generation still dominates by an order of magnitude.
+- **On-policy correction is now the named SOTA recipe, not a nice-to-have:** [Self-Forcing](https://arxiv.org/abs/2506.08009) (2025) trains the student on *its own* rollouts — §4's loop, as the paper's title concept — and [Causal Forcing](https://arxiv.org/abs/2602.02214) (Feb 2026) fixed the initialization pathologies in that family. The DAgger framing went from analogy to literature.
+- **A fourth distillation axis emerged: factorization.** [CausVid](https://arxiv.org/abs/2412.07772)-style *asymmetric* distillation changes the student's generation order, not just its size: bidirectional teacher → **causal autoregressive student**, making the student streamable and KV-cacheable. For this program, that means the §4 sequencing gains a step — capacity → steps → *factorization* → on-policy — and the student inherits the serving benefits design #1 §11 now treats as central.
+
+## 9. Summary — what I'd want the interviewer to remember
 
 1. **The contract is distributional:** preserve the spread of futures per slice — the two named enemies are mode averaging (ghost pedestrians at decision points) and mode dropping (the tail, again).
 2. **Data strategy beats loss strategy:** generation outweighs training ~50:1, so free-ride on teacher-pool byproducts, oversample by gate tightness, and let the $37K training runs iterate freely.

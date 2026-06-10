@@ -179,7 +179,14 @@ Most simulation claims don't need sensor-level realism at all. "Does the planner
 
 ---
 
-## 7. Summary — what I'd want the interviewer to remember
+## 7. Research pass — new developments (as of June 2026)
+
+- **WOSAC 2025 numbers calibrate expectations:** leaders on the [Waymo Open Sim Agents Challenge](https://arxiv.org/abs/2305.12032) sit around 0.78–0.79 on the Realism Meta-metric ([TrajTok](https://arxiv.org/abs/2506.21618) took 2nd at 0.7852). Even state-of-the-art sim agents are measurably distinguishable from humans — useful ammunition for the confidence-tier argument in §4.
+- **The community formalized §3's replay confound.** WOSAC-adjacent work introduced *Delta/Confusion metrics* that score a world model's sensitivity under partial control (e.g., ego replay) — explicitly because standard realism scores fail to predict closed-loop robustness. The open-loop-flatters/closed-loop-tells-the-truth distinction is now measured by named, public metrics, not just argued.
+- **Causality-aware evaluation:** 2025 evaluation practice restricts/extends realism scoring to agents *causal to the ego*, because aggregate scores overfit to easy background actors while missing critical interaction failures. Adopt directly into L1: weight distributional-realism metrics by causal relevance to the ego, or background traffic will launder a bad interaction model into a good score.
+- **Top WOSAC entries train closed-loop** to fix off-policy/shortcut failures — the same exposure-bias logic as design #3's on-policy correction loop, independently converged on by the sim-agents community.
+
+## 8. Summary — what I'd want the interviewer to remember
 
 1. **"Realistic enough" is claim-scoped**: the sim is certified *for specific claims, per slice* — never globally.
 2. **The ladder runs from physics sanity to outcome transfer**; perceptual metrics diagnose, decision agreement and backtesting certify.

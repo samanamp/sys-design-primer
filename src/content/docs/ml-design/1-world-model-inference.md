@@ -343,7 +343,16 @@ So the levers are memory levers: frame-block CoW with refcounts (branches pay on
 
 **Staff-level signal:** state the binding constraint before optimizing. Fanout looks like a compute-scheduling problem; the arithmetic says it's an HBM-capacity problem, and the design answer (CoW blocks + eviction tiers) follows from that, not from FLOPs.
 
-## 11. Summary — what I'd want the interviewer to remember
+## 11. Research pass — new developments (as of June 2026)
+
+What the frontier did while this doc was being written — and what it changes:
+
+- **The field converged on exactly the hybrid §4 predicted.** The dominant 2025–26 recipe for real-time interactive video/world models is *asymmetric distillation*: a bidirectional diffusion teacher distilled into a **causal, few-step autoregressive student** — streamable, KV-cacheable, real-time. [CausVid](https://arxiv.org/abs/2412.07772) (CVPR 2025) established it; Self-Forcing (2025) trained the student on its own rollouts; [Causal Forcing](https://arxiv.org/abs/2602.02214) (Feb 2026) and Causal Forcing++ (May 2026) fixed its initialization pathologies; [Rolling Forcing](https://arxiv.org/abs/2509.25161) does real-time long-horizon streaming.
+- **Real-time interactive world models are now shipping practice**, not research: HY-WorldPlay, Hunyuan-GameCraft-2, RELIC, Yume-1.5 (2025–26) all serve user-controllable world simulation live. The interactive-pool requirement in §5 has working existence proofs.
+- **Waymo's own stack confirmed the shape** ([Waymo World Model](https://waymo.com/blog/2026/02/the-waymo-world-model-a-new-frontier-for-autonomous-driving-simulation/), Feb 2026): Genie-3-based, camera + lidar, action/layout/language control, and an explicit *efficient variant* for large-scale simulation — the teacher/efficient-variant split of this design, in production.
+- **What this changes here:** the serving target is less "diffusion with fewer steps" and more "causal student with a KV cache plus a 1–4 step head." That promotes the prefix-sharing/branching machinery (§6, §10.3) from optimization to *central serving primitive* — a causal student makes counterfactual forking exactly as cheap as the CoW design assumed.
+
+## 12. Summary — what I'd want the interviewer to remember
 
 1. **Napkin math first**: 12K tokens / 100 ms kills naive AR; $36/mile kills serving the teacher. The design is forced by arithmetic, not preference.
 2. **Two SLOs, two pools**: throughput (miles/GPU-hr) for the bulk fleet, latency only where a human/hardware is in the loop. Sim-time ≠ wall-clock.
