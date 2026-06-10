@@ -144,7 +144,20 @@ Efficient variant: 3B student, 4 denoise steps, FP8
   100K miles/day ≈ $24K/day            (program is now fundable)
 ```
 
-Real-time check: 0.36 s/tick on one GPU is 3.6× too slow for the 100 ms interactive tick → TP across 4 GPUs ≈ ~0.1 s. So: **a small TP4 low-latency pool for interactive use; everything else runs throughput-mode.**
+Real-time check: 0.36 s/tick on one GPU is 3.6× too slow for the 100 ms interactive tick. Data parallelism can't fix this — a closed-loop rollout is sequential (the planner consumes frame *t* before action *t+1* exists), so replicas add concurrent *streams*, never faster *ticks*. The levers on single-stream latency are: fewer steps, a faster chip, or splitting the model. But splitting isn't free, and the LLM-serving intuition that "TP comms are negligible on NVLink" does **not** transfer:
+
+```
+TP4, per denoise pass (28 layers, hidden 3072, 12K tokens):
+  compute:  7.4e13 FLOPs ÷ 4 GPUs ÷ 0.8 PFLOP/s (FP8)   ≈ 23 ms
+  comms:    2 all-reduces/layer × 28 = 56 all-reduces
+            message = 12K tok × 3072 × 2 B ≈ 75 MB each  (LLM decode: ~6 KB!)
+            ring traffic ≈ 113 MB/GPU @ ~400 GB/s NVLink ≈ 0.3 ms each → ~16 ms
+  → ~39 ms/pass unoverlapped → 4 passes ≈ 156 ms.  Naive TP4 MISSES the budget.
+```
+
+In LLM decode, TP all-reduces carry one token and are latency-bound; here every pass forwards all 12K frame tokens, so they're 75 MB and *bandwidth*-bound — ~40% overhead, and per-GPU ring traffic (2(N−1)/N × message) barely changes with N, so TP8 shrinks compute but not comms. Closing the gap to 100 ms takes some combination of: FP8 activations on the wire (halves comms), comm/compute overlap[^3], a 2-step interactive variant, or **sequence parallelism** instead of TP — split the 12K tokens across GPUs (Ulysses/ring-attention style), and the MLP (~⅔ of FLOPs) needs no comms at all, which is why DiT serving stacks tend to prefer SP over Megatron-style TP. Either way the split must stay inside one NVLink island; crossing nodes over IB is ~10× worse and instantly dominates.
+
+**Staff-level signal:** parallelism strategy is *per pool*: the bulk fleet is pure data parallelism (comm-free replicas, near-linear scaling — exactly what a small model wants for throughput); model-splitting is conceded only where single-stream latency must shrink, and you do the comms arithmetic before claiming it fits. So: **a small SP/TP low-latency pool for interactive use; everything else runs throughput-mode on independent replicas.**
 
 **Staff-level signal:** simulation does **not** need to run in real time unless a human or physical hardware is in the loop. Sim-time and wall-clock are decoupled; the bulk fleet should run at whatever rate maximizes miles/GPU-hour (large batches, full utilization), even if each rollout is slower than real time. Conflating "10 Hz world" with "10 Hz wall-clock" is the most common over-engineering trap in this problem.
 
@@ -152,36 +165,52 @@ Real-time check: 0.36 s/tick on one GPU is 3.6× too slow for the 100 ms interac
 
 ## 6. System architecture
 
+Top level — four components, one job each:
+
 ```
-                        ┌────────────────────────────────────────────┐
-                        │            Scenario Scheduler               │
-                        │  (priority queue: long-tail mining requests,│
-                        │   regression suites, counterfactual fanout) │
-                        └──────┬─────────────────────┬───────────────┘
-                               │ bulk (throughput)   │ interactive (latency)
-                               ▼                     ▼
-                ┌──────────────────────────┐   ┌──────────────────────┐
-                │  Rollout Worker Pool      │   │  Low-latency Pool    │
-                │  student FP8, big batches │   │  student TP4, 10 Hz  │
-                │  N rollouts per GPU       │   │  engineer / HIL use  │
-                └──────┬───────────────────┘   └──────────────────────┘
-                       │ each worker runs the closed loop:
-                       │
-                       │   ┌─────────────┐  action aₜ  ┌──────────────┐
-                       │   │ Planner     │────────────►│ World Model  │
-                       │   │ under test  │◄────────────│ Server       │
-                       │   └─────────────┘ frames tₜ₊₁ │ (KV/state    │
-                       │        ▲                      │  cache here) │
-                       │        │ rollout health ✗ →   └──────────────┘
-                       │        │ discard + requeue to teacher
-                       ▼
-        ┌──────────────────────────┐      ┌───────────────────────────┐
-        │ Eval & Metrics Store      │      │ Teacher Pool (offline)    │
-        │ outcomes, slices, cost    │      │ golden scenarios, distill │
-        │ per mile, realism scores  │      │ data, arbitration of      │
-        └──────────────────────────┘      │ flagged rollouts          │
-                                          └───────────────────────────┘
+                  ┌─────────────────────┐
+                  │  Scenario Scheduler │  decides WHAT to simulate,
+                  └──────────┬──────────┘  at which tier, on which pool
+                             │
+              ┌──────────────┴───────────────┐
+              ▼                              ▼
+   ┌──────────────────────┐      ┌──────────────────────┐
+   │      BULK POOL       │      │   INTERACTIVE POOL   │
+   │  optimize: miles/    │      │  optimize: tick      │
+   │  GPU-hour            │      │  latency             │
+   │                      │      │                      │
+   │  student · FP8       │      │  student · SP/TP     │
+   │  big batches         │      │  10 Hz, small        │
+   └──────────┬───────────┘      └──────────┬───────────┘
+              │                             │
+              └──────────────┬──────────────┘
+                             ▼
+                  ┌─────────────────────┐
+                  │ Eval & Metrics Store│  outcomes, slices,
+                  └─────────────────────┘  $/mile, realism scores
+
+   off to the side, small and offline:
+   ┌─────────────────────────────────────────────────┐
+   │ TEACHER POOL — golden scenarios · distillation  │
+   │ data · standing audit stream · second opinion   │
+   │ on any rollout the health checks flag           │
+   └─────────────────────────────────────────────────┘
 ```
+
+Inside every rollout worker, the closed loop itself:
+
+```
+      ┌─────────────┐    action aₜ     ┌────────────────┐
+      │   Planner   │ ───────────────► │  World Model   │
+      │ under test  │ ◄─────────────── │  (KV / state   │
+      └─────────────┘   frames tₜ₊₁    │   cache lives  │
+             │                         │   here)        │
+             │ health check fails?     └────────────────┘
+             ▼
+      discard rollout, requeue to teacher
+```
+
+Walking through it: the **scheduler** is a priority queue of simulation requests (long-tail mining, regression suites, counterfactual fanout) and routes each to a tier and pool. The **bulk pool** is where ~all the GPUs are — independent replicas, big batches, nothing fancy. The **interactive pool** is small and exists only because humans and hardware-in-the-loop need 10 Hz wall-clock. The **teacher pool** never serves production traffic; it generates golden scenarios and distillation data, and arbitrates anything the student's health checks flag. Everything writes outcomes to one **metrics store**, because the agreement dashboards (section 7) need student and teacher results side by side.
 
 **The closed-loop tick** (bulk mode, batched across rollouts):
 
@@ -265,6 +294,22 @@ If the question is "does the planner merge correctly," object-level sim answers 
 4. **The gate is downstream agreement**, per-slice, not image quality — an efficient simulator that changes the planner's evaluations is worse than a slow one.
 5. **Standing teacher audit** forever; silent evaluation drift is the failure mode that matters.
 6. **Portfolio, not monolith**: route every sim question to the cheapest tier that answers it.
+
+[^3]: **Comm/compute overlap:** GEMMs run on the SMs; an all-reduce mostly uses NVLink and the copy engines. Different hardware resources — so they *can* run concurrently. The catch is dependency: layer ℓ's all-reduce output feeds layer ℓ's residual-add/LayerNorm, so you can't just compute ahead. The standard trick is **chunking**: split the 12K frame tokens into k chunks, and the moment chunk 1's GEMM finishes, launch its all-reduce on a side CUDA stream while the SMs start chunk 2's GEMM:
+
+    ```
+    Unoverlapped (one 75 MB all-reduce after the full GEMM):
+      SMs:     [████████ GEMM, 12K tokens ████████]
+      NVLink:                                      [████ AR 75 MB ████]
+      wall:    |—————— 23 ms ——————|—————— 16 ms ——————|   = 39 ms
+
+    Overlapped (4 chunks × 3K tokens, all-reduces pipelined behind compute):
+      SMs:     [ G1 ][ G2 ][ G3 ][ G4 ]
+      NVLink:        [ A1 ][ A2 ][ A3 ][ A4 ]
+      wall:    |—— ~max(compute, comms) + last chunk's AR ≈ 27 ms ——|
+    ```
+
+    Exposed comm time shrinks from the whole tensor to roughly the *last chunk's* all-reduce: ideal overlap turns `compute + comms` into `max(compute, comms)`, so our 39 ms pass becomes ~25–28 ms. Caveats that keep it from being free: NCCL kernels steal some SMs (the overlapped GEMMs run ~10–20% slower), more chunks hide more comms but make each GEMM smaller and less efficient, so k is tuned (4–8 typical), and the final chunk's all-reduce is always exposed. In practice you don't hand-roll this — it's a library feature: TransformerEngine's TP overlap, Megatron's sequence-parallel overlap, PyTorch async-TP.
 
 [^2]: **Long tail:** picture a histogram of driving scenarios sorted by frequency. A handful of scenario types (cruising a lane, stopping at a light, routine merges) account for almost all miles — that's the head. Then comes an enormous number of scenario types that are each individually rare — a couch on the freeway, a tornado, an elephant on the road — stretching out as a long, thin tail. No single tail event matters statistically, but *collectively* the tail is where nearly all safety-critical risk lives, because the common cases were solved long ago. The brutal data property: you can 10× your fleet miles and still never observe a specific tail event — which is exactly why Waymo wants a generative world model that can *synthesize* tail scenarios instead of waiting to encounter them.
 
