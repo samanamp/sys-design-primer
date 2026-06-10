@@ -67,6 +67,10 @@ export default defineConfig({
 					autogenerate: { directory: 'diffusion' },
 				},
 				{
+					label: 'ML Design',
+					autogenerate: { directory: 'ml-design' },
+				},
+				{
 					label: 'ML Breadth',
 					autogenerate: { directory: 'ml-breadth' },
 				},
