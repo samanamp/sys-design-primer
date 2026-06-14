@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git pull *)",
+      "Bash(git checkout *)",
+      "Bash(grep -v ':0$')",
+      "Bash(git status *)"
+    ]
+  }
+}
