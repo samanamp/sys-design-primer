@@ -52,6 +52,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .prompt-list{margin:.2rem 0 0;padding-left:1.2rem;color:var(--muted);font-size:.9rem}
 .prompt-list li{margin:.15rem 0}
 .note{font-size:.85rem;color:var(--muted)}
+.answer pre{background:var(--code-bg);border-radius:6px;padding:.6rem .8rem;overflow-x:auto;font-size:.78rem;line-height:1.45;margin:.3rem 0 .6rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.codelbl{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin:.5rem 0 .1rem}
+.codelbl.bad{color:var(--bad)}.codelbl.good{color:var(--good)}
 .legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-top:.4rem}
 .legend span{display:inline-flex;align-items:center;gap:.35rem}
 .sw{width:12px;height:12px;border-radius:2px;display:inline-block}
@@ -307,6 +310,127 @@ function S_recompile(){
     fix:`Stabilize shapes: pad to buckets, mark_dynamic on genuinely dynamic dims, raise the cache-size limit if the shape set is small and finite, or exclude the offending module from compilation. Win: p99 → p50; steady-state throughput unchanged.`};
 }
 const GENS=[S_unoverlapped,S_starvation,S_launchbound,S_straggler,S_membound,S_syncstall,S_bubble,S_alloc,S_commbound,S_recompile,S_healthy,S_healthy];
+
+const KEYS=["unoverlapped","starvation","launchbound","straggler","membound","syncstall","bubble","alloc","commbound","recompile","healthy","healthy"];
+const CODE={
+unoverlapped:{bad:
+`# overlap silently broken: unused-param search re-walks the graph
+model = DDP(model, find_unused_parameters=True)   # graph break
+for p in model.parameters():                      # custom hook syncs
+    p.register_hook(lambda g: log_norm(g.norm().item()))`,
+good:
+`model = DDP(model, gradient_as_bucket_view=True) # default overlap
+# no per-grad host syncs; DDP fires bucketed AllReduce
+# DURING backward. Verify: first ncclDevKernel launches
+# before backward ends in the trace.`},
+starvation:{bad:
+`loader = DataLoader(ds, batch_size=256,
+    num_workers=0)               # decode on the training thread
+for x, y in loader:
+    x = x.to(device)             # blocking H2D, cold cache`,
+good:
+`loader = DataLoader(ds, batch_size=256,
+    num_workers=8, prefetch_factor=4,
+    pin_memory=True, persistent_workers=True)
+for x, y in loader:
+    x = x.to(device, non_blocking=True)  # overlaps with compute`},
+launchbound:{bad:
+`# eager per-op dispatch: ~1000 tiny launches per token
+def decode_step(x):
+    for layer in model.layers:   # python loop, one kernel per op
+        x = layer(x)
+    return x`,
+good:
+`# capture once, replay as ONE launch
+compiled = torch.compile(model, mode="reduce-overhead")  # CUDA graphs
+# or manually:
+g = torch.cuda.CUDAGraph()
+with torch.cuda.graph(g):
+    static_out = model(static_in)
+g.replay()   # whole step, single launch`},
+straggler:{bad:
+`# nothing in YOUR code is wrong - find the slow rank:
+torch.cuda.synchronize(); t0 = time.time()
+loss.backward()
+torch.cuda.synchronize()
+print(f"rank {dist.get_rank()} bwd: {time.time()-t0:.3f}s")`,
+good:
+`# rank 3 shows 590ms vs 395ms elsewhere -> hardware, not NCCL
+# confirm thermals/clocks on that node:
+#   nvidia-smi dmon -s pucm     (watch sm clock under load)
+#   dcgmi dmon -e 150,155       (throttle reasons)
+# then: rebalance shards / drain + replace the node`},
+membound:{bad:
+`# batch-2 decode: every token re-reads all weights
+out = model.generate(prompt, max_new_tokens=512)  # AI ~ 2 FLOP/B
+# hand-tuning this GEMV cannot beat the HBM roofline`,
+good:
+`# change the operating point, not the kernel
+engine = LLM(model, quantization="fp8")     # half the bytes/token
+# and raise effective batch via continuous batching -
+# AI scales ~ with batch until the ridge (~295 on H100)`},
+syncstall:{bad:
+`for micro in split(batch, 8):
+    loss = model(micro).loss
+    loss.backward()
+    running += loss.item()        # DtoH sync EVERY microbatch
+    pbar.set_postfix(l=running)   # host waits for GPU each time`,
+good:
+`losses = []
+for micro in split(batch, 8):
+    loss = model(micro).loss
+    loss.backward()
+    losses.append(loss.detach())  # stays on device, no sync
+if step % 50 == 0:                # sync once in a while
+    log(torch.stack(losses).mean().item())`},
+bubble:{bad:
+`# 8 stages, 8 microbatches: bubble = (p-1)/(m+p-1) = 7/15 = 47%
+engine = PipelineParallel(model, num_stages=8,
+                          num_microbatches=8)`,
+good:
+`# quadruple microbatches: bubble = 7/39 = 18%
+engine = PipelineParallel(model, num_stages=8,
+                          num_microbatches=32)
+# or interleaved schedule (virtual stages) to cut it further`},
+alloc:{bad:
+`# every request shape unique -> allocator fragments,
+# falls back to cudaFree/cudaMalloc (device-wide sync)
+logits = model(tokens)            # tokens: any length`,
+good:
+`# stable shapes + resizable pool
+# PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+tokens = pad_to_bucket(tokens, buckets=[512,1024,2048,4096])
+# serving: paged KV cache with fixed-size blocks
+# verify: torch.cuda.memory_stats()["num_alloc_retries"] stays flat`},
+commbound:{bad:
+`# fp32 gradient all-reduce crossing a 100GbE link every step
+model = DDP(model)                # 2.6 GB over ~12 GB/s = the trace`,
+good:
+`# halve the bytes + keep traffic on NVLink where possible
+from torch.distributed.algorithms.ddp_comm_hooks import default_hooks
+model.register_comm_hook(pg, default_hooks.bf16_compress_hook)
+# and/or: gradient accumulation (fewer syncs per sample),
+# hierarchical all-reduce: intra-node NVLink first, then cross-node`},
+recompile:{bad:
+`compiled = torch.compile(model)
+for batch in loader:              # every new seq len -> guard fail
+    out = compiled(batch)         # -> full recompile, GPU idle`,
+good:
+`# stabilize the shape set
+batch = pad_to_bucket(batch, buckets=[512,1024,2048,4096])
+# or declare the dynamic dim up front:
+torch._dynamo.mark_dynamic(batch, 1)
+# verify: TORCH_LOGS=recompiles shows zero after warmup`},
+healthy:{bad:
+`# the trap is inventing work. First, prove there is a gap:
+sched_gap = step_ms - gpu_busy_ms      # here: ~2%. Timeline is done.`,
+good:
+`# next lever is INSIDE kernels, not between them:
+#   ncu --set full --kernel-name regex:gemm  (roofline section)
+# check dominant GEMM shape, precision (bf16->fp8), batch scaling.
+# It is also correct to say: "this trace is healthy."`},
+};
+
 let order=[],tid=null,t=120,current=null,traceN=0;
 const KNAMES={compute:["ampere_bf16_s16816gemm_128x64","flash_fwd_kernel","vectorized_elementwise_kernel","layernorm_fwd"],comm:["ncclDevKernel_AllReduce_Sum_bf16"],host:["cudaLaunchKernel"],mem:["cudaMemcpyAsync"]};
 function exportPerfetto(){
@@ -342,10 +466,15 @@ function render(tr){
 function tick(){t--;const m=Math.floor(Math.abs(t)/60),s=Math.abs(t)%60;$("timer").textContent=(t<0?"−":"")+m+":"+String(s).padStart(2,"0");$("timer").classList.toggle("over",t<0);}
 function newTrace(){
   if(!order.length)order=GENS.map((_,i)=>i).sort(()=>Math.random()-0.5);
-  const p=GENS[order.pop()](); current=p;
+  const gi=order.pop(); const p=GENS[gi](); current=p;
   $("scenario").innerHTML=p.q; render(p);
   $("final").textContent=p.final;
   $("body").innerHTML=`<h3>The signature</h3><p>${p.sig}</p><h3>Confirming measurement</h3><p>${p.conf}</p><h3>Fix &amp; expected win</h3><p>${p.fix}</p>`;
+  const c=CODE[KEYS[gi]];
+  if(c){const h=document.createElement("h3");h.textContent="The code";$("body").appendChild(h);
+    for(const [cls,lbl,txt] of [["bad","Before — the guilty pattern",c.bad],["good","After",c.good]]){
+      const l=document.createElement("div");l.className="codelbl "+cls;l.textContent=lbl;$("body").appendChild(l);
+      const pre=document.createElement("pre");pre.textContent=txt;$("body").appendChild(pre);}}
   $("answer").classList.remove("show");
   clearInterval(tid);t=120;$("timer").textContent="2:00";$("timer").classList.remove("over");
   tid=setInterval(tick,1000);
