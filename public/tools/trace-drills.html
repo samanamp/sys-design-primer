@@ -91,6 +91,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 <div class="btns">
   <button class="primary" id="new">New trace</button>
   <button id="reveal">Reveal diagnosis</button>
+  <button id="export" title="Download this timeline as a Chrome-trace JSON and open it at ui.perfetto.dev">Export to Perfetto (.json)</button>
 </div>
 <div class="answer" id="answer">
   <div class="final" id="final"></div>
@@ -271,7 +272,20 @@ function S_healthy(){
 }
 
 const GENS=[S_unoverlapped,S_starvation,S_launchbound,S_straggler,S_membound,S_syncstall,S_bubble,S_alloc,S_healthy,S_healthy];
-let order=[],tid=null,t=120;
+let order=[],tid=null,t=120,current=null,traceN=0;
+const KNAMES={compute:["ampere_bf16_s16816gemm_128x64","flash_fwd_kernel","vectorized_elementwise_kernel","layernorm_fwd"],comm:["ncclDevKernel_AllReduce_Sum_bf16"],host:["cudaLaunchKernel"],mem:["cudaMemcpyAsync"]};
+function exportPerfetto(){
+  if(!current)return;
+  const ev=ROWNAMES.map((n,i)=>({ph:"M",name:"thread_name",pid:0,tid:i,args:{name:n}}));
+  for(const sg of current.segs){
+    if(!sg.c)continue;
+    ev.push({ph:"X",name:sg.l||pick(KNAMES[sg.c]),cat:sg.c,pid:0,tid:sg.r,
+      ts:Math.round(sg.s*1000),dur:Math.max(Math.round((sg.e-sg.s)*1000),1)});
+  }
+  const blob=new Blob([JSON.stringify({traceEvents:ev,displayTimeUnit:"ms"})],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=`trace-drill-${++traceN}.json`;a.click();URL.revokeObjectURL(a.href);
+}
 const $=id=>document.getElementById(id);
 const CLS={compute:"var(--compute)",comm:"var(--comm)",host:"var(--host)",mem:"var(--mem)"};
 
@@ -293,7 +307,7 @@ function render(tr){
 function tick(){t--;const m=Math.floor(Math.abs(t)/60),s=Math.abs(t)%60;$("timer").textContent=(t<0?"−":"")+m+":"+String(s).padStart(2,"0");$("timer").classList.toggle("over",t<0);}
 function newTrace(){
   if(!order.length)order=GENS.map((_,i)=>i).sort(()=>Math.random()-0.5);
-  const p=GENS[order.pop()]();
+  const p=GENS[order.pop()](); current=p;
   $("scenario").innerHTML=p.q; render(p);
   $("final").textContent=p.final;
   $("body").innerHTML=`<h3>The signature</h3><p>${p.sig}</p><h3>Confirming measurement</h3><p>${p.conf}</p><h3>Fix &amp; expected win</h3><p>${p.fix}</p>`;
@@ -303,4 +317,5 @@ function newTrace(){
 }
 $("new").addEventListener("click",newTrace);
 $("reveal").addEventListener("click",()=>{$("answer").classList.add("show");clearInterval(tid);});
+$("export").addEventListener("click",exportPerfetto);
 </script>
