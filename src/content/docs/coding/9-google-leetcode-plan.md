@@ -1,50 +1,37 @@
 ---
 title: "Google Coding Round: 17-Day Daily Plan"
-description: "A 17-day LeetCode practice plan built from the Google company tag's 30-day and 3-month frequency data (pulled July 17, 2026), organized by pattern with the interview protocol baked in."
+description: "A 17-day LeetCode practice plan built from the Google company tag's 30-day and 3-month frequency data (pulled July 17, 2026), fully interleaved across domains so every problem forces cold pattern recognition."
 ---
 
 # Google Coding Round: 17-Day Daily Plan
 
-Built from the LeetCode Premium Google tag, frequency-sorted, 30-day and 3-month windows (pulled 2026-07-17). Google rotates questions, so this trains the *distribution*, not the paper: arrays/two-pointer, sliding window, binary search (especially on-answer), intervals/monotonic stack, heaps, graphs, light-to-medium DP, and design-lite.
+Built from the LeetCode Premium Google tag, frequency-sorted, 30-day and 3-month windows (pulled 2026-07-17). Google rotates questions, so this trains the *distribution*, not the paper: arrays/two-pointer, sliding window, binary search (especially on-answer), intervals/monotonic stack, heaps, graphs, light-to-medium DP, and design-lite. The plan is **interleaved, not blocked**: consecutive problems come from different domains, so recognizing the pattern is part of every rep — blocked practice pre-loads the answer to that question and produces fake confidence.
 
 **Protocol per problem (this is the actual interview skill):** restate + ask one clarifying question about constraints → state brute force and its complexity in one sentence → name the target approach and complexity *before coding* → code cleanly, narrating → test on one normal + one edge case out loud → then ask yourself the Google follow-up: "what if the input doesn't fit in memory / arrives as a stream / must be answered in O(1) per query?" Target: 25 min per medium, then stop and read the editorial regardless.
 
 **Daily shape (~75–90 min):** warm-up easy (10 min) + 2 core mediums (50 min) + review yesterday's misses (15 min). Hards are marked — attempt 15 minutes for the idea, then study the solution; Google rarely requires a full hard implementation, but the ideas (binary-search-on-answer, monotonic stack) show up inside mediums.
 
-## Days 1–5 — Arrays, strings, two pointers, sliding window
+## Days 1–15 — interleaved
+
+Domains are deliberately mixed within and across days — no "binary-search week." Each problem should force the *which pattern is this?* decision cold, because that decision is most of the interview. If two problems in a row feel like the same tool, that's a bug; tell me and I'll reshuffle.
 
 | Day | Warm-up | Core |
 |---|---|---|
-| 1 | [1. Two Sum](https://leetcode.com/problems/two-sum/) | [3. Longest Substring Without Repeating Characters](https://leetcode.com/problems/longest-substring-without-repeating-characters/) · [15. 3Sum](https://leetcode.com/problems/3sum/) |
-| 2 | [121. Best Time to Buy and Sell Stock](https://leetcode.com/problems/best-time-to-buy-and-sell-stock/) | [11. Container With Most Water](https://leetcode.com/problems/container-with-most-water/) · [560. Subarray Sum Equals K](https://leetcode.com/problems/subarray-sum-equals-k/) |
-| 3 | [88. Merge Sorted Array](https://leetcode.com/problems/merge-sorted-array/) | [209. Minimum Size Subarray Sum](https://leetcode.com/problems/minimum-size-subarray-sum/) · [904. Fruit Into Baskets](https://leetcode.com/problems/fruit-into-baskets/) |
-| 4 | [169. Majority Element](https://leetcode.com/problems/majority-element/) | [5. Longest Palindromic Substring](https://leetcode.com/problems/longest-palindromic-substring/) · [1004. Max Consecutive Ones III](https://leetcode.com/problems/max-consecutive-ones-iii/) |
-| 5 | [268. Missing Number](https://leetcode.com/problems/missing-number/) | [238. Product of Array Except Self](https://leetcode.com/problems/product-of-array-except-self/) · [31. Next Permutation](https://leetcode.com/problems/next-permutation/) · **hard idea:** [42. Trapping Rain Water](https://leetcode.com/problems/trapping-rain-water/) |
-
-## Days 6–9 — Binary search, intervals, stacks/monotonic structures
-
-| Day | Warm-up | Core |
-|---|---|---|
-| 6 | [35. Search Insert Position](https://leetcode.com/problems/search-insert-position/) | [33. Search in Rotated Sorted Array](https://leetcode.com/problems/search-in-rotated-sorted-array/) · [162. Find Peak Element](https://leetcode.com/problems/find-peak-element/) |
-| 7 | [69. Sqrt(x)](https://leetcode.com/problems/sqrtx/) | [875. Koko Eating Bananas](https://leetcode.com/problems/koko-eating-bananas/) · **hard idea:** [410. Split Array Largest Sum](https://leetcode.com/problems/split-array-largest-sum/) (BS-on-answer — high frequency at Google) |
-| 8 | [20. Valid Parentheses](https://leetcode.com/problems/valid-parentheses/) | [56. Merge Intervals](https://leetcode.com/problems/merge-intervals/) · [253. Meeting Rooms II](https://leetcode.com/problems/meeting-rooms-ii/) |
-| 9 | [496. Next Greater Element I](https://leetcode.com/problems/next-greater-element-i/) | [394. Decode String](https://leetcode.com/problems/decode-string/) · **hard idea:** [239. Sliding Window Maximum](https://leetcode.com/problems/sliding-window-maximum/) (deque) or [84. Largest Rectangle in Histogram](https://leetcode.com/problems/largest-rectangle-in-histogram/) |
-
-## Days 10–13 — Linked lists, trees, graphs, heaps
-
-| Day | Warm-up | Core |
-|---|---|---|
-| 10 | [206. Reverse Linked List](https://leetcode.com/problems/reverse-linked-list/) | [2. Add Two Numbers](https://leetcode.com/problems/add-two-numbers/) · [146. LRU Cache](https://leetcode.com/problems/lru-cache/) (design staple) |
-| 11 | [110. Balanced Binary Tree](https://leetcode.com/problems/balanced-binary-tree/) | [102. Binary Tree Level Order Traversal](https://leetcode.com/problems/binary-tree-level-order-traversal/) · [662. Maximum Width of Binary Tree](https://leetcode.com/problems/maximum-width-of-binary-tree/) |
-| 12 | [700. Search in a Binary Search Tree](https://leetcode.com/problems/search-in-a-binary-search-tree/) | [200. Number of Islands](https://leetcode.com/problems/number-of-islands/) · [994. Rotting Oranges](https://leetcode.com/problems/rotting-oranges/) |
-| 13 | [1046. Last Stone Weight](https://leetcode.com/problems/last-stone-weight/) | [215. Kth Largest Element in an Array](https://leetcode.com/problems/kth-largest-element-in-an-array/) · [347. Top K Frequent Elements](https://leetcode.com/problems/top-k-frequent-elements/) · **hard idea:** [295. Find Median from Data Stream](https://leetcode.com/problems/find-median-from-data-stream/) (two heaps) |
-
-## Days 14–15 — DP, backtracking, design-lite, simulation
-
-| Day | Warm-up | Core |
-|---|---|---|
-| 14 | [70. Climbing Stairs](https://leetcode.com/problems/climbing-stairs/) | [198. House Robber](https://leetcode.com/problems/house-robber/) · [322. Coin Change](https://leetcode.com/problems/coin-change/) · [300. Longest Increasing Subsequence](https://leetcode.com/problems/longest-increasing-subsequence/) |
-| 15 | [359. Logger Rate Limiter](https://leetcode.com/problems/logger-rate-limiter/) (Google design-lite staple) | [17. Letter Combinations of a Phone Number](https://leetcode.com/problems/letter-combinations-of-a-phone-number/) · [8. String to Integer (atoi)](https://leetcode.com/problems/string-to-integer-atoi/) (messy-spec simulation, very Google) · [54. Spiral Matrix](https://leetcode.com/problems/spiral-matrix/) |
+| 1 | [1. Two Sum](https://leetcode.com/problems/two-sum/) (hash) | [33. Search in Rotated Sorted Array](https://leetcode.com/problems/search-in-rotated-sorted-array/) (binary search) · [102. Binary Tree Level Order Traversal](https://leetcode.com/problems/binary-tree-level-order-traversal/) (tree/BFS) |
+| 2 | [206. Reverse Linked List](https://leetcode.com/problems/reverse-linked-list/) (linked list) | [560. Subarray Sum Equals K](https://leetcode.com/problems/subarray-sum-equals-k/) (prefix-sum hash) · [253. Meeting Rooms II](https://leetcode.com/problems/meeting-rooms-ii/) (intervals/heap) |
+| 3 | [20. Valid Parentheses](https://leetcode.com/problems/valid-parentheses/) (stack) | [3. Longest Substring Without Repeating Characters](https://leetcode.com/problems/longest-substring-without-repeating-characters/) (sliding window) · [200. Number of Islands](https://leetcode.com/problems/number-of-islands/) (graph/DFS) |
+| 4 | [70. Climbing Stairs](https://leetcode.com/problems/climbing-stairs/) (DP) | [11. Container With Most Water](https://leetcode.com/problems/container-with-most-water/) (two pointers) · [875. Koko Eating Bananas](https://leetcode.com/problems/koko-eating-bananas/) (BS-on-answer) |
+| 5 | [110. Balanced Binary Tree](https://leetcode.com/problems/balanced-binary-tree/) (tree) | [15. 3Sum](https://leetcode.com/problems/3sum/) (two pointers) · [322. Coin Change](https://leetcode.com/problems/coin-change/) (DP) · **hard idea:** [42. Trapping Rain Water](https://leetcode.com/problems/trapping-rain-water/) |
+| 6 | [268. Missing Number](https://leetcode.com/problems/missing-number/) (bit/math) | [146. LRU Cache](https://leetcode.com/problems/lru-cache/) (design) · [209. Minimum Size Subarray Sum](https://leetcode.com/problems/minimum-size-subarray-sum/) (sliding window) |
+| 7 | [35. Search Insert Position](https://leetcode.com/problems/search-insert-position/) (binary search) | [56. Merge Intervals](https://leetcode.com/problems/merge-intervals/) (intervals) · [198. House Robber](https://leetcode.com/problems/house-robber/) (DP) |
+| 8 | [121. Best Time to Buy and Sell Stock](https://leetcode.com/problems/best-time-to-buy-and-sell-stock/) (array) | [394. Decode String](https://leetcode.com/problems/decode-string/) (stack) · [994. Rotting Oranges](https://leetcode.com/problems/rotting-oranges/) (graph/BFS) |
+| 9 | [1046. Last Stone Weight](https://leetcode.com/problems/last-stone-weight/) (heap) | [5. Longest Palindromic Substring](https://leetcode.com/problems/longest-palindromic-substring/) (string) · [162. Find Peak Element](https://leetcode.com/problems/find-peak-element/) (binary search) · **hard idea:** [410. Split Array Largest Sum](https://leetcode.com/problems/split-array-largest-sum/) (BS-on-answer — high frequency at Google) |
+| 10 | [169. Majority Element](https://leetcode.com/problems/majority-element/) (array) | [2. Add Two Numbers](https://leetcode.com/problems/add-two-numbers/) (linked list) · [347. Top K Frequent Elements](https://leetcode.com/problems/top-k-frequent-elements/) (heap/hash) |
+| 11 | [496. Next Greater Element I](https://leetcode.com/problems/next-greater-element-i/) (monotonic stack) | [904. Fruit Into Baskets](https://leetcode.com/problems/fruit-into-baskets/) (sliding window) · [215. Kth Largest Element in an Array](https://leetcode.com/problems/kth-largest-element-in-an-array/) (quickselect/heap) |
+| 12 | [700. Search in a Binary Search Tree](https://leetcode.com/problems/search-in-a-binary-search-tree/) (tree) | [238. Product of Array Except Self](https://leetcode.com/problems/product-of-array-except-self/) (array) · [17. Letter Combinations of a Phone Number](https://leetcode.com/problems/letter-combinations-of-a-phone-number/) (backtracking) |
+| 13 | [69. Sqrt(x)](https://leetcode.com/problems/sqrtx/) (binary search) | [662. Maximum Width of Binary Tree](https://leetcode.com/problems/maximum-width-of-binary-tree/) (tree/BFS) · [8. String to Integer (atoi)](https://leetcode.com/problems/string-to-integer-atoi/) (messy-spec simulation, very Google) · **hard idea:** [239. Sliding Window Maximum](https://leetcode.com/problems/sliding-window-maximum/) (deque) or [84. Largest Rectangle in Histogram](https://leetcode.com/problems/largest-rectangle-in-histogram/) |
+| 14 | [88. Merge Sorted Array](https://leetcode.com/problems/merge-sorted-array/) (two pointers) | [31. Next Permutation](https://leetcode.com/problems/next-permutation/) (array) · [300. Longest Increasing Subsequence](https://leetcode.com/problems/longest-increasing-subsequence/) (DP + binary search) |
+| 15 | [359. Logger Rate Limiter](https://leetcode.com/problems/logger-rate-limiter/) (design-lite, Google staple) | [54. Spiral Matrix](https://leetcode.com/problems/spiral-matrix/) (simulation) · [1004. Max Consecutive Ones III](https://leetcode.com/problems/max-consecutive-ones-iii/) (sliding window) · **hard idea:** [295. Find Median from Data Stream](https://leetcode.com/problems/find-median-from-data-stream/) (two heaps) |
 
 ## Days 16–17 — Timed mocks
 
