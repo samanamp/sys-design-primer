@@ -20,6 +20,8 @@ Interviewers for ML performance roles use fumbled arithmetic as a shallowness si
 | TPU v6e (Trillium) | 918 | 1.64 | ~560 | 32 |
 | NVIDIA A100 (anchor) | 312 | 2.0 | ~156 | 80 |
 
+Native low-precision by generation: v5e/v5p/Trillium → int8 (AQT/QAT path, fp8 emulated); Ironwood → first native fp8 (4,614 TF) and spec-sheet twin of B200; B200 adds fp4 (NVFP4). Full generation-vs-NVIDIA map: [dtype table](/optimization/16-quantization/#85-accelerator-dtype-support-by-generation--tpu-vs-contemporary-nvidia).
+
 Ridge point = peak FLOP/s ÷ bytes/s. Arithmetic intensity above the ridge → compute-bound; below → memory-bound. FP8 doubles the FLOP number, so the FP8 ridge is ~2×. Quote dense (non-sparsity) numbers — marketing figures are often 2× with sparsity.
 
 ## The four identities

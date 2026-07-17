@@ -758,6 +758,26 @@ Lesson: **format × hardware × kernel** is one triple. Never analyze the format
 
 ---
 
+## 8.5 Accelerator dtype support by generation — TPU vs contemporary NVIDIA
+
+The dtype you can serve in is a *hardware-generation* question before it is an algorithms question. The map (dense, no-sparsity figures; ✱ = unverified/press-only):
+
+| TPU gen (year) | Main numbers | Native MXU dtypes | NVIDIA contemporary | Its main numbers | Its native low-precision |
+| --- | --- | --- | --- | --- | --- |
+| v2 (2017) / v3 (2018) | 45 / 123 TF bf16 · 16 / 32 GB | bf16 (fp32 accum) | V100 | 125 TF fp16 · 16–32 GB @ 0.9 TB/s | fp16 |
+| v4 (2021) | 275 TF bf16 · 32 GB @ 1.2 TB/s | bf16; int8 on v4i inference variant | A100 | 312 TF bf16 · 80 GB @ 2.0 TB/s | bf16, int8 (624 TOPS) |
+| v5e (2023) | 197 TF bf16 / 394 TOPS int8 · 16 GB @ 0.82 TB/s | bf16, **int8** | L40S / H100-era efficiency tier | L40S: 362 TF fp8 · 48 GB | fp8, int8 |
+| v5p (2023) | 459 TF bf16 / ~918 TOPS int8 · 95 GB @ 2.76 TB/s | bf16, int8 | H100 SXM | 989 TF bf16 / 1,979 fp8 · 80 GB @ 3.35 TB/s | **fp8 (Transformer Engine)**, int8 |
+| Trillium v6e (2024) | 918 TF bf16 · 32 GB @ 1.64 TB/s | bf16, int8 (fp8 emulated); int4 ✱ | H200 | 989 TF bf16 · 141 GB @ 4.8 TB/s | fp8, int8 |
+| Ironwood TPU7x (2025) | 2,307 TF bf16 / **4,614 TF fp8** · 192 GB @ 7.37 TB/s | bf16, **fp8 E4M3/E5M2 (first native)**; int8 in stack but absent from spec sheet | B200 | 2,250 TF bf16 / 4,500 fp8 / 9,000 fp4 · 180 GB @ 7.7 TB/s | **fp4 (NVFP4)**, fp8, int8 |
+| TPU 8t "Sunfish" (training) / 8i "Zebrafish" (inference) — previewed Apr 2026, TSMC 2nm, targeting late 2027 ✱ | specs unannounced ✱ | expected to extend fp8 / sub-8-bit ✱ | Rubin (VR200, 2026–27) | press: ~50 PF fp4 class per package ✱ | fp4/fp8 ✱ |
+
+What the map tells you, in interview form:
+
+- **TPU and NVIDIA converged from opposite ends.** TPU bet on bf16 + int8 (AQT, bit-exact QAT) while NVIDIA productized fp8 two generations earlier (Hopper Transformer Engine, 2022) and reached fp4 with Blackwell. Ironwood vs B200 is the first spec-sheet-symmetric generation: ~2.3 PF bf16, ~4.5 PF fp8, ~190 GB, ~7.5 TB/s on both sides — the differentiation moved to the fabric (ICI torus + OCS at 9,216 chips vs NVLink domains of 72) and the compiler stack.
+- **Dtype strategy is fleet-conditional.** Serving plan pre-Ironwood: AQT int8 weights (+ int8 KV) — the QAT path, not post-hoc. On Ironwood: fp8 weights/activations natively, which is friendlier to activation outliers than int8. NVFP4/MXFP4 are Blackwell-side formats with no TPU equivalent yet — a real gap to name honestly if asked "what does NVIDIA have that TPU doesn't."
+- **The trap answer:** treating "int8" as one thing. Post-hoc W8A8 has the outlier problem that gave int8 its bad-quality reputation; weight-only W8A16 is near-lossless; QAT int8 (AQT) is bit-exact between train and serve. Rank the risk, then pick per fleet generation.
+
 ## 9. Kernel and systems view
 
 ### 9.1 Where speedup actually comes from
