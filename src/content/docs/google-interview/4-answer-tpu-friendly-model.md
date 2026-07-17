@@ -277,7 +277,7 @@ The order encodes the risk philosophy: every unrecoverable decision (shapes, MLA
 
 Named exclusions are half the design. Things this program deliberately does not do:
 
-- **Upcycling the dense 70B into the MoE** (Mixtral-style sparse upcycling). Tempting as a compute saver, but it locks in the donor's shapes (unaligned vocab, GQA KV layout, bf16-native numerics) — three of my six levers die on arrival. Considered, rejected, revisit only if the training budget collapses.
+- **Upcycling the dense 70B into the MoE as the flagship path.** Sparse upcycling + MLA conversion is real (see the scratch-vs-adapt follow-up in §6) and is used here as the de-risking stage — but as the *final* model it locks in donor shapes (vocab, head_dim, bf16-native numerics) and correlated experts. Adopted as stage one, rejected as the destination; the crossover arithmetic in §6 says why.
 - **Sub-8-bit weights (int4/NVFP4-class) at launch.** The int8→int4 step roughly doubles the bandwidth win but the calibration/eval cost on an MoE with a compressed KV latent is a research project, not a launch dependency. Q3 candidate behind its own gate.
 - **Custom Pallas kernels as a launch dependency.** Adopt Ragged Paged Attention v3; write nothing until a post-launch profile shows XLA leaving specific, named time on the table.
 - **A third model tier.** Two SKUs (Ironwood flagship, Trillium distilled) cover the frontier; a third multiplies eval, serving, and distillation surface for marginal coverage.
@@ -287,8 +287,25 @@ Named exclusions are half the design. Things this program deliberately does not 
 
 ## 6. Escalating Follow-Ups
 
-**"Why not just port Llama-70B to TPU and skip the training run?"**
-You should — as the baseline. A well-served dense 70B on Trillium (int8, good sharding, bucketed shapes) is the control arm and probably gets within ~1.3× of GPU cost. But you can't recover what's baked in: dense activation (the bytes-per-token term), full-size KV heads (the batch term), post-hoc quantization (quality tax), no co-trained speculation head (acceptance term). Those four compound to the ~2–3× in §4, and none is reachable by porting. The honest framing: porting is a serving project with a ceiling; the question asked for the ceiling to move.
+**"Why not just port Llama-70B to TPU and skip the training run?" — the scratch-vs-adapt decision, done properly**
+
+This deserves more than a dismissal, because there are really three paths and a staff answer prices all of them:
+
+*Path A — port and serve (the control arm).* A well-served dense 70B on Trillium (int8, good sharding, bucketed shapes) probably gets within ~1.3× of GPU cost. Zero training spend, but every architectural lever stays where the donor left it. This is the baseline every other path must beat.
+
+*Path B — adapt the checkpoint (the path that's gotten real since 2025).* The claim "you can't change the architecture without retraining" is no longer true, and pretending otherwise loses credibility:
+- **Sparse upcycling** (Komatsuzaki et al., arXiv 2212.05055): initialize MoE experts from copies of the dense FFN — the 70B's weights seed a ~8×70B-FFN MoE that recovers quality with a small fraction of from-scratch tokens. This directly reuses the initial weights.
+- **MHA/GQA → MLA conversion**: TransMLA (arXiv 2502.07864) and MHA2MLA (arXiv 2502.14837) retrofit latent-KV attention onto existing checkpoints with low-single-digit-percent fine-tuning budgets — the KV bytes-per-token lever, post hoc.
+- **QAT fine-tune with AQT** recovers most of the post-hoc-quantization quality tax.
+- **Bolt-on speculation** (EAGLE-class heads) trains against the frozen model — the acceptance lever without touching the base.
+
+So Path B recovers roughly three of my four levers at maybe 5–10% of the flagship training cost. What it *cannot* recover: the dense-activation bytes term only partially (upcycled experts start correlated — they differentiate slowly and rarely reach trained-from-scratch MoE quality-per-active-param), MXU-hostile donor shapes (head_dim, vocab), and the tokenizer.
+
+*Path C — from scratch (the doc's mainline).* Full lever access, full cost.
+
+*On distillation specifically* — the objection "the models aren't in the same family" is half right. **Logit-level** KD across families is genuinely awkward (vocabulary/tokenizer mismatch means the teacher's distribution doesn't align token-for-token; ULD-style tricks exist but are lossy). **Sequence-level** distillation — generating data with the teacher and fine-tuning the student on it — has no family requirement at all, and it's how cross-family distillation actually ships. The two-SKU design in §3.6 is same-family (flagship→Trillium SKU), where logit KD works cleanly; that's deliberate.
+
+*The decision rule*, which is the actual staff signal: scratch-vs-adapt is a tokens-served amortization question. If the training delta is ~$40M and the from-scratch design saves an additional ~0.2×–0.3× on serving cost versus the best adapted model, the crossover sits at roughly 10¹⁴–10¹⁵ served tokens — months of Google-scale traffic, decades of a small deployment. **At Google volume, scratch wins and Path B is the de-risking stage** (upcycle + convert first, learn the serving numbers on real chips, then commit the flagship run). At startup volume, Path B *is* the answer and claiming otherwise is resume-driven engineering. Saying which side of the crossover you're on — and why — is the answer; picking a path without the crossover is the miss.
 
 **"What breaks at 9,216 chips?"**
 That's the Ironwood full pod — a training-scale question. Failure modes in order: (1) anything crossing the ICI/DCN boundary by accident — EP or TP spanning slices meets ~100×-lower bandwidth; parallelism layout must be torus-aware by construction. (2) All-to-all bisection: EP dispatch is the collective most sensitive to it; keep EP groups within OCS-optimized sub-tori and hierarchical (in-slice dispatch, cross-slice only for data parallelism). (3) MTBF: at ~9K chips, preemptions and chip failures are continuous — OCS routing around failed cubes plus checkpoint/resume cadence become first-class design inputs. (4) Load imbalance amplification: a 2% expert hot-spot is invisible at 64 chips and a synchronous-step straggler at 9K.
