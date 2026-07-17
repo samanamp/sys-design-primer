@@ -68,6 +68,26 @@ $$
 
 No chip holds that; sharded across one pod's 8,960 chips it's **~1.8 GB/chip** — nearly free against 95 GB HBM. The real memory pressure is **activations**: 8K sequences through a wide MoE. Answer: activation checkpointing (rematerialize per layer block) plus the sharding layout below. The headline: at pod scale, *model state sharding is a solved problem; activations and communication are the live constraints.*
 
+Make the per-chip budget concrete — it shows *why* activations, not parameters, are the live constraint:
+
+```text
+v5p HBM budget per chip (95 GB), 8K seq, per-layer-block remat
+─────────────────────────────────────────────────────────────────────
+Sharded model state   ▓ 1.8 GB     (16 TB / 8,960 — the "free" part)
+Activations + remat   ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ~38 GB
+  (checkpointed layer inputs ~2 GB + live-block rematerialization
+   peak + 8K-seq attention workspace — the actual constraint)
+All-to-all buffers    ▓▓ ~5 GB     (EP dispatch/combine staging,
+                                    double-buffered)
+XLA workspace/frags   ▓▓▓ ~8 GB    (fusion temporaries, collective
+                                    staging, static allocation slack)
+Headroom              ░░░░░░░░ ~42 GB  (spent deliberately: less
+                                    aggressive remat → recompute
+                                    FLOPs bought back → MFU)
+```
+
+The bar is the argument: model state is 2% of HBM, activations are ~40%. The remaining headroom is a *tuning dial* — relax checkpointing until activations fill it, converting spare memory into fewer recomputed FLOPs.
+
 This is the first staff signal: the memory math says you do **not** need aggressive tensor parallelism to fit. That frees the layout to be chosen for communication cost, not memory desperation.
 
 ---
@@ -98,7 +118,74 @@ Concrete layout per pod (one logical mesh, e.g. `(dcn_data=2, fsdp=~140, expert=
 - **Data parallelism across the DCN boundary.** The two pods are pure DP replicas; the only cross-pod traffic is gradient reduction, overlapped with the backward pass. This is exactly the multislice pattern Google has demonstrated publicly at 50K+ chips on v5e, and Trillium's GA materials claim ~99% scaling efficiency at 12 pods for DP-over-DCN workloads — evidence the boundary placement is right.
 - **Context parallelism: only if long-context is in scope.** For a 128K–1M context phase, add a CP axis (ring attention over an ICI axis) and shrink EP or FSDP to pay for it — trade it explicitly rather than hand-waving "add CP."
 
+Draw the mapping — the pod is a physical object, and each mesh axis has a bytes-per-step bill and a compute window it must hide under:
+
+```text
+        One v5p pod: 8,960 chips as a 3D torus (16 x 20 x 28, OCS-wired
+        from 4x4x4 cubes; logical mesh (fsdp=140, expert=64) folded on)
+
+                    Z (28)  ── FSDP axis (part) ──────────────┐
+                   ╱                                          │
+                  ╱   ┌────────────────────────────┐          │
+                 ╱   ╱                            ╱│          │
+                ╱   ╱     EP = 64 group          ╱ │   all-gather bf16
+               ╱   ╱   (innermost X + part Y)   ╱  │   weights fwd+bwd,
+              ╱   ╱   ◄══ all-to-all ══►       ╱   │   reduce-scatter
+             ╱   ╱   dispatch+combine         ╱    │   grads:
+            ╱   ╱   ~12 GB/chip/step         ╱     │   ~6 GB/chip/step,
+           ╱   ╱   hides under expert       ╱      │   prefetched under
+          ╱   ╱   matmuls (~100 ms)        ╱       │   next layer's
+         ╱   └────────────────────────────┘        │   compute
+        └───── X (16) ─────── Y (20) ──────────────┘
+                                │
+                                │  DCN boundary (multislice,
+                                │  ~100x slower per chip than ICI)
+                                ▼
+        ┌──────────────────────────────────────────────┐
+        │  Pod B: pure DP replica (dcn_data = 2)       │
+        │  grad all-reduce: ~0.22 GB/chip/step (bf16   │
+        │  1T grads / 8,960) — must hide under the     │
+        │  ~1.4 s backward pass → needs only           │
+        │  ~160 MB/s/chip of DCN. Comfortable.         │
+        └──────────────────────────────────────────────┘
+```
+
+The same argument as a table — dimension by dimension, with the alternative each choice beat:
+
+| Dimension | Physical axis | Bytes moved / step / chip | Hidden under | Why not the alternative |
+| --- | --- | --- | --- | --- |
+| Expert (EP=64) | Innermost ICI axes (X + part of Y) | ~12 GB (dispatch + combine, ~60 MoE layers × ~0.2 GB) | Expert matmuls, per layer | On DCN or outer axes, all-to-all bisection cost sets step time |
+| FSDP (~140) | Remaining ICI extent (Y/Z) | ~6 GB (bf16 weight all-gather fwd+bwd + grad reduce-scatter) | Adjacent layers' compute (prefetch) | Full replication wastes 16 TB nobody has; ZeRO-3 is ~free at 1.8 GB/chip |
+| Data (DP=2) | DCN, pod↔pod | ~0.22 GB (grad all-reduce) | ~1.4 s backward | EP or FSDP over DCN = 100× slower link in the per-layer path |
+| Tensor (TP=1) | — (not used) | 0 | — | Memory math doesn't demand it; per-layer collectives would fight EP for fast axes |
+| Pipeline (PP=1) | — (not used) | 0 | — | Bubbles buy nothing when ICI already spans the slice |
+| Context (CP) | Only for long-context phase | ring attention traffic | attention compute | Costs an axis EP/FSDP currently use — trade explicitly |
+
 **The JAX story** (say this concretely): single-controller Pathways runtime; the model is written with explicit shardings — `jax.jit` with `NamedSharding`/`PartitionSpec`, `shard_map` where the communication schedule matters, GSPMD/Shardy partitioning the rest. Note in passing that `pmap` is gone (removed around JAX v0.10) — explicit sharding is the canonical path. Then the verification discipline from [the TPU article](/optimization/18-tpu-xla-optimization/): read what propagation actually chose, confirm in the xprof trace that FSDP all-gathers and the EP all-to-all sit **under** matmuls (collective-matmul/latency-hiding scheduler), and that the mesh's logical axes landed on the physical torus axes you intended — a wrong `make_mesh` ordering silently multiplies hop counts.
+
+### Anatomy of one 2.3 s step
+
+Decompose the step the way xprof will show it. Pure math time per step is $6 \times 100\text{B} \times 16\text{M} / (17{,}920 \times 459 \times 10^{12}) \approx 1.17$ s — everything above that line is overhead, and 1.17 / 2.3 is exactly the ~51% MFU claimed earlier:
+
+```text
+t=0 ms                750                        2,150   2,250  2,300
+├── forward ~750 ─────┼──── backward ~1,400 ─────┼─ opt ─┼─ 50 ─┤
+│                     │                          │ +router upd  │
+│ MXU math ~390 ms    │ MXU math ~780 ms         │ ~100 ms      │
+│ EP a2a (overlapped) │ EP a2a + FSDP RS         │              │
+│ FSDP AG (prefetch)  │ (mostly overlapped)      │              │
+│ remat replay        │ + recompute fwd blocks   │              │
+│                     │ DCN grad all-reduce ═════╡ (fully       │
+│                     │  ~0.22 GB under 1,400 ms │  hidden)     │
+└─────────────────────┴──────────────────────────┴──────────────┘
+Exposed (non-overlapped) collectives: ~100 ms — a2a tails on
+imbalanced expert layers + the last reduce-scatter with no
+compute left to hide under. Final 50 ms: host callback + step gap.
+
+Sum of MXU math: ~1,170 ms  →  MFU = 1,170 / 2,300 ≈ 51%
+```
+
+Where monitoring attaches: **step time** is the outer bracket; the **per-collective exposed-vs-overlapped split** is the ~100 ms tail (it grows when expert balance degrades — the a2a tail is your router-health signal showing up in systems metrics); **host input-buffer occupancy** guards the 50 ms gap (if the gap grows, the pipeline, not the model, regressed); **DCN all-reduce completion margin** tells you how much backward-time budget remains before adding DP replicas would expose it.
 
 ---
 
@@ -124,11 +211,57 @@ $$
 
 (Can we get the chips? Are they doing forward/backward vs. restarting? Is the program using them well — i.e., MFU?) Naive design loses double digits from the middle term. The mitigation ladder, cheapest first:
 
-1. **Multi-tier asynchronous checkpointing.** Snapshot optimizer state to host RAM every few minutes (seconds of stall, then async drain), persist to GCS on a longer cadence, replicate across pods. Naive synchronous save of 16 TB to object storage every 30 minutes at 2.3 s/step would dominate lost time on its own — treating checkpointing as "call `save()`" is a listed way to fail this question.
+1. **Multi-tier asynchronous checkpointing — with the actual arithmetic.** The checkpoint is 16 TB (1T params × 16 B model state), but *sharded* it's 1.8 GB/chip, and that changes everything:
+   - **Tier 0, HBM peer replica:** pod B's live DP copy *is* the checkpoint — zero write cost, restore = re-broadcast 1.8 GB/chip over ICI, **seconds**.
+   - **Tier 1, host RAM:** each host DMAs its shard over PCIe (~1.8 GB × 4 chips/host at tens of GB/s → **~1–2 s stall**, then the training step resumes while the host drains).
+   - **Tier 2, CNS/GCS:** async persist from host RAM. 16 TB across ~2,240 hosts is only ~7 GB/host — the write is easy; the *restore* is not: a cold restore fans 16 TB back out to 18K chips through object storage and re-establishes the job, realistically **10–20 minutes** (~300–500 lost steps at 2.3 s).
+   - **Interval optimization (do the expected-value math out loud).** Assume per-chip MTBF ~5 years. Fleet failure rate: $17{,}920 / (5 \times 8{,}760\,\text{h}) \approx 0.41/\text{h}$ → **fleet MTBF ≈ 2.4 h ≈ 8,800 s**. Young's approximation for optimal interval with checkpoint cost $C$: $\tau^* \approx \sqrt{2 C \cdot \text{MTBF}}$. With the async tier-1 cost $C \approx 2$ s: $\tau^* \approx \sqrt{2 \times 2 \times 8{,}800} \approx 190$ s — **checkpoint every ~3 minutes**, total overhead ≈ $C/\tau^* + \tau^*/(2\,\text{MTBF}) \approx 1\% + 1\% = 2\%$. Now price the naive design: synchronous 30-min saves to CNS cost, per failure, ~15 min average lost work + ~15–20 min restore ≈ **1,800–2,100 s lost per 8,800 s MTBF ≈ 20–24% of the run** — before counting the save stalls. Same hardware, 10× difference, purely from checkpoint architecture. Treating checkpointing as "call `save()`" is a listed way to fail this question.
 2. **Redundant in-memory model state instead of restore-from-disk.** The Gemini precedent ([arXiv 2312.11805](https://arxiv.org/abs/2312.11805)): keep redundant replicas of model state in memory across the data-parallel dimension; on failure, recover from a healthy replica's live copy rather than a checkpoint. Our two-pod DP layout gives this for free — pod B's state *is* pod A's hot backup. Gemini attributes goodput going from ~85% (their prior largest run) to ~97% partly to this.
 3. **Topology reconfiguration around failures.** v5p pods interconnect 4×4×4 cubes through **optical circuit switches** ([TPU v4 paper, arXiv 2304.01433](https://arxiv.org/abs/2304.01433): OCS is <5% of system cost, <3% of power). When a cube fails, the OCS layer re-wires a spare cube into the slice — reported on the order of ~10 seconds — so the job resumes on an intact torus instead of draining to a smaller degraded one. Hot-spare cubes are a budget line item you argue for explicitly.
 4. **Elastic training + node hot-swap** (per Google's elastic-training/goodput Cloud posts): the Pathways single-controller model lets the run **suspend-resume** and continue at reduced scale (e.g., drop one DP replica) while hardware is swapped, rather than sitting fully idle. Rescale events are logged as batch-size changes for later loss forensics.
-5. **Silent data corruption (SDC).** The failure mode that doesn't page you. A marginal chip computes wrong numbers without crashing; you find out as an unexplained loss excursion 50K steps later — or never. Defenses, again per Gemini: lightweight **proactive scans** on idle/suspect hardware, and **deterministic replay** — because data order and program are deterministic, re-run a suspect step range on different hardware and diff the gradients bit-for-bit. Grad-norm-per-slice canaries catch the loud cases; replay convicts the quiet ones. Unprompted SDC discussion is one of the strongest staff signals available in this question.
+5. **Silent data corruption (SDC).** The failure mode that doesn't page you. A marginal chip computes wrong numbers without crashing; you find out as an unexplained loss excursion 50K steps later — or never. The concrete detection recipe:
+   - **Continuous, nearly free:** per-DP-replica grad-norm divergence. Both pods compute gradients over *different* data, so norms won't match exactly — but track the ratio's distribution; a replica whose grad-norm distribution drifts is the canary. Per-slice grad-norm splits inside a pod localize further.
+   - **Periodic, cheap:** a **canary batch** — one fixed, versioned batch run through fwd+bwd every N thousand steps on every slice. Because shapes, program, and data are deterministic, the resulting loss/grad checksum must be bit-identical across slices and across time (for fixed weights). Any mismatch names the guilty hardware immediately.
+   - **On suspicion:** **deterministic replay** — re-run the suspect step range (determinism gives you the exact batches) on known-good chips and diff gradients bit-for-bit. Replay convicts or acquits in minutes.
+   - **The cost of NOT catching it:** an SDC event that corrupts optimizer state doesn't roll back with a 3-minute checkpoint — by the time the loss visibly excurses, every checkpoint tier may already contain the poison. Worst case you rewind 50K+ steps (at 2.3 s/step, ~32 chip-hours × 18K chips ≈ **days of the fleet's output**) or, if it stays sub-visible, ship a subtly worse model with no line item explaining why. That asymmetry — detection costs ~0.1% of step time, non-detection costs days-to-unbounded — is the whole argument. Unprompted SDC discussion is one of the strongest staff signals available in this question.
+
+### The goodput waterfall
+
+Put numbers on the ladder — this is the difference the reliability machinery buys, and it's the ~85% vs ~97% story the Gemini report tells:
+
+```text
+Naive (sync 30-min CNS checkpoints, restore-from-disk, no spares)
+100% ┤████████████████████████████████████████
+     │  −2%  scheduling (pod acquisition, maintenance windows)
+ 98% ┤███████████████████████████████████████
+     │ −13%  runtime: ~0.41 fail/h × (~900 s avg lost work
+     │        + ~1,100 s CNS restore) + sync save stalls
+ 85% ┤██████████████████████████████████
+     │  −?   program losses already counted in MFU
+ 85% ┤══ net runtime goodput ══  → tokens/day × 0.85
+
+Gemini-style (async multi-tier ckpt, HBM-replica restore, OCS re-wire)
+100% ┤████████████████████████████████████████
+     │  −1%  scheduling (hot-spare cubes absorb maintenance)
+ 99% ┤███████████████████████████████████████
+     │  −2%  runtime: ~1% ckpt overhead + ~1% failures
+     │        (avg loss ≈ 95 s work + ~10 s OCS re-wire
+     │         + seconds-scale replica restore, per 8,800 s)
+ 97% ┤═══ net runtime goodput ═══  → tokens/day × 0.97
+```
+
+12 points of goodput on an 18K-chip month is ~2,200 chip-days — the machinery in this section is worth more than most model-side optimizations you could name.
+
+### Failure modes, priced
+
+| Failure | Detection signal | Blast radius | Recovery path | Goodput cost/event |
+| --- | --- | --- | --- | --- |
+| Single chip/host crash | Heartbeat loss, barrier timeout | Whole slice stalls (SPMD is synchronous) | Restart on spare host, restore from HBM replica / host RAM | ~1–3 min |
+| 4×4×4 cube failure | ICI link errors, slice health | Slice torus broken | OCS re-wires spare cube (~10 s) + tier-0/1 restore | ~1–2 min |
+| DCN partition | Cross-pod all-reduce timeout | DP sync lost; pods fine individually | Elastic: continue single-pod (half throughput), rejoin later | Minutes at 50% rate |
+| Input pipeline stall | Prefetch buffer occupancy → 0 | Both pods idle at full power | Fix/reshard input; no state lost | 100% of stall duration |
+| SDC (marginal chip) | Canary checksum mismatch, replica grad-norm drift, replay diff | Corrupted state propagates through *all* checkpoint tiers | Quarantine chip, rewind to pre-corruption ckpt, replay data window | Minutes if caught; days-to-unbounded if not |
+| Recompilation storm | Sawtooth step time, host compile logs | Whole job, repeatedly | Fix shape leak (pad final batch, freeze eval shapes) | ~Minutes per compile × frequency |
 
 ---
 
@@ -140,6 +273,20 @@ The MoE tax isn't just all-to-all bandwidth — it's a router that can destabili
 - **Capacity-factor overflow.** With fixed expert capacity, overflowing tokens are dropped — a *silent quality* leak that shows up as a plateau, not a crash. Monitor dropped-token fraction per layer as a first-class metric; alert on drift.
 - **Expert death.** Individual experts stop receiving tokens and their weights go stale. Track per-expert token counts over a trailing window; dead experts are a router-health regression even when aggregate loss looks fine.
 - **Router numerics.** Keep router logits/softmax in fp32 even in a bf16 run; router z-loss to bound logit growth. Many "mystery loss spikes at scale" are router numerics.
+
+The router health board, as concrete thresholds:
+
+| Metric | Healthy range | Failure it catches |
+| --- | --- | --- |
+| Router entropy (per layer) | High and stable; slow drift down as experts specialize | Sudden drop → router collapse onto few experts |
+| Per-expert token share (trailing window) | Within ~2–3× of uniform (1/64 per EP group) | Hot experts (step-time tail) and dead experts (stale weights) |
+| Dropped-token fraction | < ~1% per layer, flat | Capacity-factor overflow — silent quality leak |
+| Max router logit / z-loss magnitude | Bounded, non-growing | Router numerics divergence → the "mystery" loss spike |
+| Aux-loss (or bias-update) magnitude | Small, stable fraction of total loss | Balance machinery fighting the task loss |
+| EP all-to-all exposed time (from xprof) | ~flat ms tail per step | Load imbalance showing up as a *systems* regression |
+| Expert-layer step-time variance across EP groups | < few % | The slowest expert group silently setting global step time |
+
+The last two rows are the point of the table: router pathologies surface in the *systems* dashboard before the loss moves — the a2a tail in the step-time gantt above is a model-health signal wearing a systems costume.
 
 ---
 
