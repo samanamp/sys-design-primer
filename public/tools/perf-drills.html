@@ -1,0 +1,196 @@
+<title>ML Perf Mental-Math Drills</title>
+<style>
+:root{
+  --bg:#f7f7f5; --panel:#ffffff; --ink:#22252b; --muted:#5b636f; --line:#e2e2dd;
+  --accent:#b97a1e; --accent-soft:#f4e6cf; --good:#2e7d54; --bad:#b34a4a;
+  --code-bg:#f0efe9;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#16181d; --panel:#1e2128; --ink:#e6e8ec; --muted:#a9b1bd; --line:#2c313a;
+  --accent:#e8a13c; --accent-soft:#3a2f1c; --good:#4caf7d; --bad:#d95f5f;
+  --code-bg:#14161b;
+}}
+:root[data-theme="dark"]{
+  --bg:#16181d; --panel:#1e2128; --ink:#e6e8ec; --muted:#a9b1bd; --line:#2c313a;
+  --accent:#e8a13c; --accent-soft:#3a2f1c; --good:#4caf7d; --bad:#d95f5f;
+  --code-bg:#14161b;
+}
+:root[data-theme="light"]{
+  --bg:#f7f7f5; --panel:#ffffff; --ink:#22252b; --muted:#5b636f; --line:#e2e2dd;
+  --accent:#b97a1e; --accent-soft:#f4e6cf; --good:#2e7d54; --bad:#b34a4a;
+  --code-bg:#f0efe9;
+}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,sans-serif;margin:0;padding:2rem 1rem 4rem}
+main{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:2rem}
+h1{font-size:1.5rem;margin:0}
+h2{font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+p{margin:.4rem 0}
+.sub{color:var(--muted);margin:.3rem 0 0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1.4rem 1.5rem}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;font-variant-numeric:tabular-nums}
+th{text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:.35rem .8rem .35rem 0}
+td{padding:.4rem .8rem .4rem 0;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+td.r,th.r{text-align:right}
+.ridge{color:var(--accent);font-weight:700}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+code{background:var(--code-bg);padding:.1rem .35rem;border-radius:4px;font-size:.85em}
+.formula{background:var(--code-bg);border-radius:6px;padding:.7rem .9rem;margin:.6rem 0;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;overflow-x:auto;white-space:nowrap}
+.formula b{color:var(--accent)}
+/* drill */
+.drillhead{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.timer{font-family:ui-monospace,Menlo,monospace;font-size:1.6rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+.timer.over{color:var(--bad)}
+.cat{display:inline-block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;background:var(--accent-soft);color:var(--accent);padding:.18rem .55rem;border-radius:99px;font-weight:700}
+.q{font-size:1.05rem;margin:1rem 0 1.2rem}
+.q .mono{font-weight:600}
+.btns{display:flex;gap:.7rem;flex-wrap:wrap}
+button{font:inherit;font-weight:600;border-radius:6px;padding:.5rem 1.1rem;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] button.primary,button.primary{color:#1a1408}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.answer{border-top:1px dashed var(--line);margin-top:1.2rem;padding-top:1rem;display:none}
+.answer.show{display:block}
+.answer .final{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:1.05rem;margin-bottom:.6rem}
+.answer ol{margin:.3rem 0 0;padding-left:1.3rem}
+.answer li{margin:.3rem 0;font-size:.92rem}
+.verdict-good{color:var(--good);font-weight:700}
+.verdict-bad{color:var(--bad);font-weight:700}
+.note{font-size:.85rem;color:var(--muted)}
+</style>
+
+<main>
+<header>
+<h1>ML Performance mental-math drills</h1>
+<p class="sub">Block 1 practice — TPU / GPU Performance interviews. Say the reasoning aloud; target under 2:00 per problem.</p>
+</header>
+
+<section>
+<h2>Memorize these specs (dense BF16, no sparsity)</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Chip</th><th class="r">TFLOP/s (BF16)</th><th class="r">HBM BW (TB/s)</th><th class="r">Ridge (FLOP/B)</th><th class="r">HBM (GB)</th><th class="r">Shared/vector mem</th></tr>
+<tr><td>NVIDIA H100 SXM</td><td class="r">989</td><td class="r">3.35</td><td class="r ridge">~295</td><td class="r">80</td><td class="r">228 KB smem/SM · 132 SMs</td></tr>
+<tr><td>NVIDIA B200</td><td class="r">2,250</td><td class="r">8.0</td><td class="r ridge">~281</td><td class="r">192</td><td class="r">228 KB smem/SM</td></tr>
+<tr><td>AMD MI300X</td><td class="r">1,307</td><td class="r">5.3</td><td class="r ridge">~247</td><td class="r">192</td><td class="r">64 KB LDS/CU · 304 CUs</td></tr>
+<tr><td>TPU v5p</td><td class="r">459</td><td class="r">2.76</td><td class="r ridge">~166</td><td class="r">95</td><td class="r">~128 MB CMEM/VMEM-class on-chip</td></tr>
+<tr><td>TPU v6e (Trillium)</td><td class="r">918</td><td class="r">1.64</td><td class="r ridge">~560</td><td class="r">32</td><td class="r">large on-chip VMEM</td></tr>
+<tr><td>NVIDIA A100 (anchor)</td><td class="r">312</td><td class="r">2.0</td><td class="r ridge">~156</td><td class="r">80</td><td class="r">164 KB smem/SM · 108 SMs</td></tr>
+</table>
+</div>
+<p class="note">Ridge point = peak FLOP/s ÷ bytes/s. Arithmetic intensity above the ridge → compute-bound; below → memory-bound. FP8 doubles the FLOP number, so the FP8 ridge is ~2×. Verify exact numbers against current datasheets — interviewers accept round figures but not wrong ratios.</p>
+</section>
+
+<section>
+<h2>Formulas — say these without thinking</h2>
+<div class="formula">GEMM (M,N,K), bf16: FLOPs = <b>2·M·N·K</b> &nbsp; bytes ≈ 2·(MK + KN + MN) &nbsp;⇒&nbsp; AI ≈ <b>MNK / (MK+KN+MN)</b> &nbsp;(square N×N: AI ≈ N/3)</div>
+<div class="formula">Decode step, batch 1: bytes/token ≈ <b>params·dtype_bytes + KV read</b>, &nbsp; KV = 2·layers·kv_heads·head_dim·seqlen·kv_bytes &nbsp;⇒&nbsp; tok/s ceiling = <b>BW / bytes_per_token</b></div>
+<div class="formula">Prefill attention: AI grows with seqlen → compute-bound. Decode attention/GEMV: AI ≈ 1–2 FLOP/byte → hopelessly memory-bound; batching raises AI ≈ batch size.</div>
+<div class="formula">Tile fit: smem_bytes = stages·(Bm·Bk + Bk·Bn)·dtype_bytes &nbsp;·&nbsp; accum regs/thread = Bm·Bn·4 / threads &nbsp;(limit 255 regs, 64K/SM)</div>
+</section>
+
+<section>
+<div class="drillhead">
+  <div>
+    <h2 style="margin:0">Drill</h2>
+    <span class="cat" id="cat">—</span>
+  </div>
+  <div class="timer" id="timer">2:00</div>
+</div>
+<p class="q" id="question">Press <b>New problem</b> to start. Work it on paper, out loud, then reveal.</p>
+<div class="btns">
+  <button class="primary" id="new">New problem</button>
+  <button id="reveal">Reveal answer</button>
+</div>
+<div class="answer" id="answer">
+  <div class="final" id="final"></div>
+  <ol id="steps"></ol>
+</div>
+</section>
+</main>
+
+<script>
+const CHIPS=[
+ {name:"H100 SXM",tf:989,bw:3.35},
+ {name:"B200",tf:2250,bw:8.0},
+ {name:"MI300X",tf:1307,bw:5.3},
+ {name:"TPU v5p",tf:459,bw:2.76},
+ {name:"Trillium (v6e)",tf:918,bw:1.64},
+];
+const MODELS=[
+ {name:"Llama-3-8B",P:8e9,L:32,kvh:8,d:128},
+ {name:"Llama-2-13B",P:13e9,L:40,kvh:40,d:128},
+ {name:"Llama-3-70B",P:70e9,L:80,kvh:8,d:128},
+ {name:"Mistral-7B",P:7.2e9,L:32,kvh:8,d:128},
+];
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const pow2=(lo,hi)=>2**(lo+Math.floor(Math.random()*(hi-lo+1)));
+const fmt=n=>n>=1e12?(n/1e12).toFixed(2)+"T":n>=1e9?(n/1e9).toFixed(2)+"G":n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":(""+Math.round(n*100)/100);
+
+function gemm(){
+  const M=pow2(7,13),N=pow2(7,13),K=pow2(7,13),chip=pick(CHIPS);
+  const ai=M*N*K/(M*K+K*N+M*N),ridge=chip.tf*1e12/(chip.bw*1e12);
+  const cb=ai>ridge;
+  return {cat:"GEMM arithmetic intensity",
+    q:`BF16 GEMM with <span class="mono">M=${M}, N=${N}, K=${K}</span> on a ${chip.name}. What's the arithmetic intensity, and is it compute- or memory-bound?`,
+    final:`AI ≈ ${Math.round(ai)} FLOP/byte → <span class="${cb?'verdict-good':'verdict-bad'}">${cb?'compute-bound':'memory-bound'}</span> (ridge ≈ ${Math.round(ridge)})`,
+    steps:[`FLOPs = 2·M·N·K = ${fmt(2*M*N*K)}`,
+      `Bytes ≈ 2·(MK + KN + MN) = 2·(${fmt(M*K)} + ${fmt(K*N)} + ${fmt(M*N)}) = ${fmt(2*(M*K+K*N+M*N))}`,
+      `AI = MNK/(MK+KN+MN) ≈ ${Math.round(ai)} FLOP/byte`,
+      `${chip.name} ridge = ${chip.tf} TF ÷ ${chip.bw} TB/s ≈ ${Math.round(ridge)} FLOP/byte`,
+      `AI ${cb?'>':'<'} ridge → ${cb?'compute':'memory'}-bound. Shortcut: dominated by the smallest of M,N,K — AI ≲ min dim.`]};
+}
+function decode(){
+  const m=pick(MODELS),chip=pick(CHIPS),seq=pick([2048,4096,8192,16384]);
+  const wb=pick([{n:"bf16",b:2},{n:"fp8/int8",b:1}]);
+  const wBytes=m.P*wb.b, kv=2*m.L*m.kvh*m.d*seq*2;
+  const total=wBytes+kv, tps=chip.bw*1e12/total;
+  return {cat:"Decode bytes/token → tok/s ceiling",
+    q:`${m.name} (${wb.n} weights, bf16 KV), batch 1, ${m.L} layers, ${m.kvh} KV heads, head_dim ${m.d}, context <span class="mono">${seq}</span>, on a ${chip.name}. Bytes per decoded token and the tokens/sec ceiling?`,
+    final:`≈ ${fmt(total)}B/token → ceiling ≈ ${Math.round(tps)} tok/s`,
+    steps:[`Weights: ${fmt(m.P)} params × ${wb.b} B = ${fmt(wBytes)} B (every parameter read once per token)`,
+      `KV read: 2 (K&V) · ${m.L} layers · ${m.kvh} heads · ${m.d} dim · ${seq} tokens · 2 B = ${fmt(kv)} B`,
+      `Total ≈ ${fmt(total)} B/token — weights ${wBytes>kv?'dominate':'do NOT dominate; KV is comparable/larger'}`,
+      `Ceiling = ${chip.bw} TB/s ÷ ${fmt(total)} B ≈ ${Math.round(tps)} tok/s (batch 1, ignoring overlap losses)`]};
+}
+function rooflineQ(){
+  const chip=pick(CHIPS),ridge=chip.tf/chip.bw;
+  const ai=pick([1,2,8,32,64,128,256,512,1024]);
+  const cb=ai>ridge, att=Math.min(chip.tf,ai*chip.bw);
+  return {cat:"Roofline knee",
+    q:`A kernel runs at <span class="mono">${ai} FLOP/byte</span> on a ${chip.name} (${chip.tf} TF bf16, ${chip.bw} TB/s). Where's the ridge, is the kernel compute- or memory-bound, and what's its attainable TFLOP/s?`,
+    final:`Ridge ≈ ${Math.round(ridge)} FLOP/B → <span class="${cb?'verdict-good':'verdict-bad'}">${cb?'compute-bound':'memory-bound'}</span>, attainable ≈ ${Math.round(att)} TF`,
+    steps:[`Ridge = peak FLOPs ÷ BW = ${chip.tf} ÷ ${chip.bw} ≈ ${Math.round(ridge)} FLOP/byte`,
+      `AI = ${ai} ${cb?'>':'<'} ridge → ${cb?'compute':'memory'}-bound`,
+      `Attainable = min(peak, AI × BW) = min(${chip.tf}, ${ai}·${chip.bw}) ≈ ${Math.round(att)} TFLOP/s`,
+      `Fraction of peak: ${(100*att/chip.tf).toFixed(0)}%`]};
+}
+function tile(){
+  const Bm=pick([64,128,256]),Bn=pick([64,128,256]),Bk=pick([32,64]),stages=pick([2,3,4]);
+  const smem=stages*(Bm*Bk+Bk*Bn)*2, cap=228*1024;
+  const threads=pick([128,256]),regs=Bm*Bn*4/threads;
+  const fits=smem<=cap&&regs<=255;
+  return {cat:"SRAM / register budget",
+    q:`BF16 GEMM tile <span class="mono">${Bm}×${Bn}×${Bk}</span>, ${stages}-stage pipelined A and B tiles in shared memory, fp32 accumulator in registers, ${threads} threads/block, on H100 (228 KB smem/SM, 255 regs/thread). Does it fit?`,
+    final:`smem ${(smem/1024).toFixed(0)} KB, ${Math.round(regs)} accum regs/thread → <span class="${fits?'verdict-good':'verdict-bad'}">${fits?'fits':'does NOT fit'}</span>`,
+    steps:[`Smem = stages·(Bm·Bk + Bk·Bn)·2 B = ${stages}·(${Bm*Bk} + ${Bk*Bn})·2 = ${(smem/1024).toFixed(0)} KB ${smem<=cap?'≤':'>'} 228 KB`,
+      `Accumulator = Bm·Bn·4 B = ${(Bm*Bn*4/1024).toFixed(0)} KB ÷ ${threads} threads = ${Math.round(regs)} regs/thread ${regs<=255?'≤':'>'} 255`,
+      `${fits?'Both budgets OK — also check occupancy: one block uses '+(100*smem/cap).toFixed(0)+'% of SM smem.':'Reduce stages, shrink Bk, or split the accumulator across more threads.'}`]};
+}
+const GENS=[gemm,decode,rooflineQ,tile];
+let idx=-1,tid=null,t=120;
+const $=id=>document.getElementById(id);
+function tick(){t--;const m=Math.floor(Math.abs(t)/60),s=Math.abs(t)%60;$("timer").textContent=(t<0?"−":"")+m+":"+String(s).padStart(2,"0");$("timer").classList.toggle("over",t<0);}
+function newProblem(){
+  idx=(idx+1)%GENS.length;const p=GENS[idx]();
+  $("cat").textContent=p.cat;$("question").innerHTML=p.q;
+  $("final").innerHTML=p.final;
+  $("steps").innerHTML=p.steps.map(s=>`<li>${s}</li>`).join("");
+  $("answer").classList.remove("show");
+  clearInterval(tid);t=120;$("timer").textContent="2:00";$("timer").classList.remove("over");
+  tid=setInterval(tick,1000);
+}
+$("new").addEventListener("click",newProblem);
+$("reveal").addEventListener("click",()=>{$("answer").classList.add("show");clearInterval(tid);});
+</script>
