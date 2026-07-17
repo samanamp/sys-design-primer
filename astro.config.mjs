@@ -83,6 +83,10 @@ export default defineConfig({
 					autogenerate: { directory: 'optimization' },
 				},
 				{
+					label: 'Trace Reading',
+					autogenerate: { directory: 'trace-reading' },
+				},
+				{
 					label: 'Primers',
 					autogenerate: { directory: 'primers' },
 				},

@@ -1,0 +1,306 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU Trace-Reading Drills</title>
+<style>
+:root{
+  --bg:#f7f7f5; --panel:#ffffff; --ink:#22252b; --muted:#5b636f; --line:#e2e2dd;
+  --accent:#b97a1e; --accent-soft:#f4e6cf; --good:#2e7d54; --bad:#b34a4a;
+  --code-bg:#f0efe9; --compute:#4a7fb5; --comm:#c98a2e; --host:#8a8f98; --mem:#7a5fa8;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#16181d; --panel:#1e2128; --ink:#e6e8ec; --muted:#a9b1bd; --line:#2c313a;
+  --accent:#e8a13c; --accent-soft:#3a2f1c; --good:#4caf7d; --bad:#d95f5f;
+  --code-bg:#14161b; --compute:#5b93cc; --comm:#e8a13c; --host:#6b7280; --mem:#9b7fd4;
+}}
+:root[data-theme="dark"]{
+  --bg:#16181d; --panel:#1e2128; --ink:#e6e8ec; --muted:#a9b1bd; --line:#2c313a;
+  --accent:#e8a13c; --accent-soft:#3a2f1c; --good:#4caf7d; --bad:#d95f5f;
+  --code-bg:#14161b; --compute:#5b93cc; --comm:#e8a13c; --host:#6b7280; --mem:#9b7fd4;
+}
+:root[data-theme="light"]{
+  --bg:#f7f7f5; --panel:#ffffff; --ink:#22252b; --muted:#5b636f; --line:#e2e2dd;
+  --accent:#b97a1e; --accent-soft:#f4e6cf; --good:#2e7d54; --bad:#b34a4a;
+  --code-bg:#f0efe9; --compute:#4a7fb5; --comm:#c98a2e; --host:#8a8f98; --mem:#7a5fa8;
+}
+body{background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,sans-serif;margin:0;padding:2rem 1rem 4rem}
+main{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:1.6rem}
+h1{font-size:1.5rem;margin:0}
+h2{font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 .8rem}
+.sub{color:var(--muted);margin:.3rem 0 0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1.4rem 1.5rem}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.drillhead{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.timer{font-family:ui-monospace,Menlo,monospace;font-size:1.6rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--accent)}
+.timer.over{color:var(--bad)}
+.scenario{font-size:1rem;margin:1rem 0 .8rem}
+.tracewrap{overflow-x:auto;background:var(--code-bg);border-radius:6px;padding:.8rem .6rem;margin:.6rem 0 1rem}
+svg{display:block;min-width:840px}
+svg text{font-family:ui-monospace,Menlo,monospace}
+.rowlabel{fill:var(--muted);font-size:11px}
+.seglabel{fill:var(--bg);font-size:9.5px;pointer-events:none}
+.axis{fill:var(--muted);font-size:10px}
+.gridline{stroke:var(--line);stroke-width:1}
+.btns{display:flex;gap:.7rem;flex-wrap:wrap}
+button{font:inherit;font-weight:600;border-radius:6px;padding:.5rem 1.1rem;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#1a1408}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.answer{border-top:1px dashed var(--line);margin-top:1.2rem;padding-top:1rem;display:none}
+.answer.show{display:block}
+.answer .final{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:1.02rem;margin-bottom:.6rem}
+.answer h3{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .3rem}
+.answer p{margin:.3rem 0;font-size:.93rem}
+.prompt-list{margin:.2rem 0 0;padding-left:1.2rem;color:var(--muted);font-size:.9rem}
+.prompt-list li{margin:.15rem 0}
+.note{font-size:.85rem;color:var(--muted)}
+.legend{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-top:.4rem}
+.legend span{display:inline-flex;align-items:center;gap:.35rem}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block}
+</style>
+
+<main>
+<header>
+<h1>GPU trace-reading drills</h1>
+<p class="sub">A synthetic Nsight-style timeline with (usually) one injected pathology — or nothing wrong at all. Read it out loud in the fixed order, commit to a diagnosis, then reveal.</p>
+</header>
+
+<section>
+<h2>The reading order — always the same</h2>
+<ol class="prompt-list">
+<li>Find the step boundary. What's the step time, and what should it be?</li>
+<li>Gap analysis: step time − sum of GPU busy time. Where do the gaps line up?</li>
+<li>Overlap: is communication hidden behind compute, or serialized after it?</li>
+<li>Longest kernels: name the top one; is its duration justified by its math?</li>
+<li>Only then zoom into a single kernel (that's Nsight Compute's job, not the timeline's).</li>
+</ol>
+</section>
+
+<section>
+<div class="drillhead">
+  <div><h2 style="margin:0">Trace</h2></div>
+  <div class="timer" id="timer">2:00</div>
+</div>
+<p class="scenario" id="scenario">Press <b>New trace</b> to start.</p>
+<div class="tracewrap"><svg id="trace" height="10"></svg></div>
+<div class="legend">
+<span><span class="sw" style="background:var(--compute)"></span>GPU compute</span>
+<span><span class="sw" style="background:var(--comm)"></span>NCCL / comm</span>
+<span><span class="sw" style="background:var(--host)"></span>CPU / CUDA API</span>
+<span><span class="sw" style="background:var(--mem)"></span>memcpy / alloc</span>
+</div>
+<p class="note">Say: what's the step time, where are the gaps, what's your diagnosis, what one measurement confirms it, what's the fix and the expected win.</p>
+<div class="btns">
+  <button class="primary" id="new">New trace</button>
+  <button id="reveal">Reveal diagnosis</button>
+</div>
+<div class="answer" id="answer">
+  <div class="final" id="final"></div>
+  <div id="body"></div>
+</div>
+</section>
+</main>
+
+<script>
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const R={CPU:0,API:1,GPU:2,COMM:3};
+const ROWNAMES=["CPU / dataloader","CUDA API","GPU compute","NCCL"];
+
+// helpers build segments {r,s,e,c,l?} in ms
+function denseCompute(segs,t0,t1,label){ // chain of kernels with tiny gaps
+  let t=t0;
+  const names=["gemm_bf16_s16816","flash_fwd","elementwise","gemm_bf16_s16816","layernorm"];
+  while(t<t1-0.3){const d=Math.min(rnd(1.5,4),t1-t);segs.push({r:R.GPU,s:t,e:t+d,c:"compute",l:d>2.5?pick(names):null});t+=d+0.08;}
+  if(label)segs.push({r:R.GPU,s:t0,e:t1,c:null,l:null});
+}
+function apiTicks(segs,t0,t1,density){for(let t=t0;t<t1;t+=rnd(1,3)/density)segs.push({r:R.API,s:t,e:t+0.25,c:"host"});}
+function cpuLight(segs,t0,t1){segs.push({r:R.CPU,s:t0,e:t0+rnd(1,2),c:"host",l:"step()"});}
+
+function healthyStep(segs,t0,step){
+  const fwdEnd=t0+step*0.32, bwdEnd=t0+step*0.97;
+  denseCompute(segs,t0,fwdEnd); denseCompute(segs,fwdEnd+0.1,bwdEnd);
+  // overlapped bucketed all-reduce during backward
+  let t=fwdEnd+step*0.1;
+  while(t<bwdEnd-2){const d=rnd(2,4);segs.push({r:R.COMM,s:t,e:t+d,c:"comm",l:"AllReduce"});t+=d+rnd(2,5);}
+  apiTicks(segs,t0,bwdEnd,1); cpuLight(segs,t0,step);
+  return bwdEnd;
+}
+
+function S_unoverlapped(){
+  const step=rnd(46,60), comm=step*rnd(0.28,0.4);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    const cEnd=t+step; denseCompute(segs,t,t+step*0.3); denseCompute(segs,t+step*0.3+0.1,cEnd);
+    segs.push({r:R.COMM,s:cEnd+0.3,e:cEnd+0.3+comm,c:"comm",l:"ncclDevKernel_AllReduce_Sum"});
+    apiTicks(segs,t,cEnd,1); cpuLight(segs,t,step);
+    t=cEnd+comm+1.2;
+  }
+  return {win:t+2,segs,
+    q:`8×H100, 13B fine-tune with DDP. MFU is 34% and the team says "the GPUs are busy." Two steps shown. What's your read?`,
+    final:`Unoverlapped gradient all-reduce — comms serialized after backward, ${(100*comm/(step+comm)).toFixed(0)}% of the step is pure NCCL with compute idle`,
+    sig:`The NCCL row lights up only AFTER the compute stream goes quiet, every step. Overlapped DDP shows all-reduce buckets interleaved with backward; here the compute stream is dark for ${comm.toFixed(0)} ms while one long AllReduce runs.`,
+    conf:`nsys stats: compare AllReduce kernel spans vs backward span. Or log DDP bucket timings — if the first bucket fires at backward END, overlap is broken (common causes: find_unused_parameters graph breaks, gradient-as-bucket-view off, a hook forcing a sync).`,
+    fix:`Restore bucketed overlap (DDP default): check for graph-breaking model code, tune bucket_cap_mb. Expected win: hide ~all of ${comm.toFixed(0)} ms behind backward → step ${ (step+comm).toFixed(0)}→${step.toFixed(0)} ms ≈ ${(100*comm/(step+comm)).toFixed(0)}% faster.`};
+}
+function S_starvation(){
+  const step=rnd(40,52), gap=step*rnd(0.35,0.6);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    segs.push({r:R.CPU,s:t,e:t+gap,c:"mem",l:"DataLoader.__next__ / decode"});
+    const c0=t+gap; healthyStep(segs,c0,step);
+    t=c0+step+0.5;
+  }
+  return {win:t+2,segs,
+    q:`Single A100, vision fine-tune. nvidia-smi shows 60% util and the team wants a bigger GPU. Two steps shown. What's your read?`,
+    final:`Input-pipeline starvation — the GPU idles ${(100*gap/(gap+step)).toFixed(0)}% of every step waiting for the dataloader`,
+    sig:`A dead window at the START of every step: all GPU rows dark, CPU row solid with dataloader/decode work. The compute portion itself is dense and overlapped — the GPU isn't slow, it's starved.`,
+    conf:`Time next(iter(loader)) alone vs a full step. Or set num_workers=0 vs N and watch the gap move. The trace already shows it: gap ≈ ${gap.toFixed(0)} ms lines up exactly with CPU-row activity.`,
+    fix:`More workers / prefetch_factor, pin_memory + non_blocking H2D, move decode to GPU (DALI/decode-on-GPU), cache decoded tensors. A bigger GPU would make this WORSE (same feed rate, more idle). Win: step ${(gap+step).toFixed(0)}→~${step.toFixed(0)} ms.`};
+}
+function S_launchbound(){
+  const step=rnd(30,42);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    let k=t;
+    while(k<t+step){segs.push({r:R.GPU,s:k,e:k+0.35,c:"compute"});k+=0.35+0.55;} // tiny kernels, gaps
+    for(let a=t;a<t+step;a+=0.45)segs.push({r:R.API,s:a,e:a+0.4,c:"host"});
+    segs.push({r:R.CPU,s:t,e:t+step,c:"host",l:"python: module forward loop"});
+    t+=step+1;
+  }
+  return {win:t+2,segs,
+    q:`Batch-1 latency-critical inference of a small transformer on an L4. p50 latency is 3× the kernel-time budget. Two invocations shown. What's your read?`,
+    final:`Host/launch-bound — thousands of ~0.3 ms kernels separated by launch gaps; the CUDA API row is saturated and the GPU is idle ~60% of the window`,
+    sig:`Confetti: many tiny compute slivers with regular gaps between them, CUDA API row solid, CPU python thread busy the whole time. GPU busy-time ≪ wall time even though "everything is running."`,
+    conf:`nsys stats --report cuda_gpu_kern_sum: kernel count per step (thousands) and mean duration (< launch overhead ~3-10 µs each + Python dispatch). Sum of kernel time vs step time closes the case.`,
+    fix:`CUDA Graphs (capture the whole step → one launch), torch.compile with fusion (fewer, bigger kernels), batching if SLO allows. Win: step time collapses toward GPU busy time — here ~2.5×.`};
+}
+function S_straggler(){
+  const step=rnd(44,56), wait=step*rnd(0.5,0.8);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    const cEnd=t+step*0.6; denseCompute(segs,t,cEnd);
+    segs.push({r:R.COMM,s:cEnd+0.2,e:cEnd+0.2+wait,c:"comm",l:"ncclDevKernel_AllReduce (long)"});
+    apiTicks(segs,t,cEnd,1); cpuLight(segs,t,step);
+    t=cEnd+wait+1;
+  }
+  return {win:t+2,segs,
+    q:`Rank 0 of 8×H100. Step time regressed 40% overnight; nothing in the code changed. This is rank 0's trace. What's your read?`,
+    final:`Straggler rank — the long AllReduce is WAIT time, not bytes: rank 0 sits in the collective until the slowest rank arrives`,
+    sig:`One NCCL op dominating the step, but the math says this all-reduce should take a fraction of that (bytes ÷ link BW). A collective's kernel duration on a fast rank = its own transfer + waiting for stragglers. The trace you're looking at is usually NOT the guilty rank.`,
+    conf:`Compare per-rank step times / compute spans (one nsys per rank, or log t(backward_end) per rank). The rank whose COMPUTE runs long is the straggler. Then check: thermal throttling (nvidia-smi dmon clocks), a flapping NIC, imbalanced data shard, background process.`,
+    fix:`Fix the slow rank, not the collective: reseat/replace the throttling GPU, rebalance shards, isolate the node. Win: step returns to compute-bound ≈ ${ (step*0.6+2).toFixed(0)} ms.`};
+}
+function S_membound(){
+  const step=rnd(40,50), big=step*rnd(0.55,0.7);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    denseCompute(segs,t,t+step*0.25);
+    segs.push({r:R.GPU,s:t+step*0.25+0.2,e:t+step*0.25+0.2+big,c:"mem",l:"gemv / skinny gemm (HBM 96%, SM 11%)"});
+    denseCompute(segs,t+step*0.25+big+0.4,t+step);
+    apiTicks(segs,t,t+step,1); cpuLight(segs,t,step);
+    t+=step+1;
+  }
+  return {win:t+2,segs,
+    q:`Decode step of a 7B model, batch 2, H100. One kernel dominates. The team wants to "optimize the kernel." What's your read?`,
+    final:`Memory-bound dominant kernel — a batch-2 GEMV at AI≈2 FLOP/B against a ridge of ~295; it's already at the bandwidth roofline`,
+    sig:`One long kernel, no gaps around it (the schedule is fine), and the counters tell the story: HBM ~96%, SM/tensor-core utilization ~11%. This is not a bad kernel — it's a bad OPERATING POINT.`,
+    conf:`Nsight Compute on that kernel: memory throughput vs roofline (Speed-of-Light section). Mental math: weights bytes ÷ 3.35 TB/s ≈ observed duration → it's at the ceiling already.`,
+    fix:`Change the regime, not the kernel: raise effective batch (continuous batching), quantize weights (fp8/int4 → proportionally less bytes), speculative decoding (more tokens per weight read). Hand-tuning the kernel buys ~nothing. Canonical math: /optimization/15-mental-math-drills/.`};
+}
+function S_syncstall(){
+  const step=rnd(38,48);
+  const segs=[]; let t=2;
+  for(let i=0;i<4;i++){
+    const chunk=step/4;
+    denseCompute(segs,t,t+chunk*0.55);
+    segs.push({r:R.CPU,s:t+chunk*0.55,e:t+chunk,c:"host",l:i==0?"item() → cudaStreamSynchronize":null});
+    segs.push({r:R.API,s:t+chunk*0.55,e:t+chunk*0.58,c:"host"});
+    t+=chunk;
+  }
+  denseCompute(segs,t+0.5,t+0.5+step*0.5);
+  return {win:t+step*0.55+2,segs,
+    q:`Training loop on one H100 with a per-microbatch loss print and a Python-side metric. GPU util "looks fine" in nvidia-smi. What's your read?`,
+    final:`Synchronization stalls — a host sync (.item()/.cpu()) every microbatch drains the launch pipeline; the GPU runs dry at each sync point`,
+    sig:`A repeating comb: burst of compute → gap → burst → gap, with cudaStreamSynchronize on the CPU row at every gap. Async launching normally keeps the GPU ahead of the host; each sync resets that lead.`,
+    conf:`nsys: count cudaStreamSynchronize / cudaMemcpyDtoH calls per step and line them up with the gaps. Grep the loop for .item(), .cpu(), float(loss), tensor printing, tqdm postfix.`,
+    fix:`Accumulate metrics on-device, log every N steps, use non_blocking copies. Effectively free win: removes all comb gaps — here ~${(100*0.45*0.8).toFixed(0)}% of pre-fix step time.`};
+}
+function S_bubble(){
+  const step=rnd(52,64), micro=step/8;
+  const segs=[]; let t=2;
+  for(let i=0;i<8;i++){
+    const busy=(i<2||i>=6)?micro*0.45:micro*0.85;
+    denseCompute(segs,t,t+busy);
+    if(i>=2&&i<6)segs.push({r:R.COMM,s:t+busy*0.3,e:t+busy*0.3+micro*0.12,c:"comm",l:i==2?"SendRecv (p2p)":null});
+    t+=micro;
+  }
+  cpuLight(segs,2,step);apiTicks(segs,2,t,2);
+  return {win:t+2,segs,
+    q:`Rank 3 of an 8-stage pipeline-parallel 70B training run (1F1B). This stage's trace over one step. What's your read?`,
+    final:`Pipeline bubbles — warm-up/flush idle at the step edges; utilization ~${(100*(2*0.45+4*0.85+2*0.45)/8).toFixed(0)}%, bounded by microbatches-per-stage, not by any kernel`,
+    sig:`Periodic idle at the START and END of every step (ramp-up and drain), dense 1F1B alternation in the middle with p2p SendRecv slivers. No single slow kernel — the shape itself is the diagnosis. Bubble fraction ≈ (stages−1)/(microbatches+stages−1).`,
+    conf:`Compute bubble math: with m microbatches and p stages, ideal bubble = (p−1)/(m+p−1); compare against measured idle fraction. If measured ≫ ideal, look for imbalanced stages instead.`,
+    fix:`More microbatches (bubble shrinks hyperbolically), interleaved/looped schedules (virtual stages), or rebalance layers across stages if one stage's chunks run long. See /optimization/13-parallelism-stack/.`};
+}
+function S_alloc(){
+  const step=rnd(42,54);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){
+    denseCompute(segs,t,t+step*0.4);
+    segs.push({r:R.CPU,s:t+step*0.4,e:t+step*0.62,c:"mem",l:"cudaFree/cudaMalloc (allocator retry)"});
+    segs.push({r:R.API,s:t+step*0.4,e:t+step*0.62,c:"mem"});
+    denseCompute(segs,t+step*0.62,t+step);
+    cpuLight(segs,t,step); t+=step+1;
+  }
+  return {win:t+2,segs,
+    q:`LLM serving box under mixed request lengths; p99 ITL spikes 5× intermittently while p50 is fine. A spiky step shown. What's your read?`,
+    final:`Allocator stalls — cudaMalloc/cudaFree in the hot path from fragmentation; the caching allocator is emptying its pool and re-allocating (a device-synchronizing operation)`,
+    sig:`Mid-step gap with cudaMalloc/cudaFree on the API row — normally you should see ZERO cudaMalloc in steady state (PyTorch's caching allocator reuses blocks). cudaFree synchronizes the device: everything drains.`,
+    conf:`torch.cuda.memory_stats(): num_alloc_retries / num_device_alloc climbing during spikes. In serving: correlate spikes with admission of long-context requests (KV blocks fragmenting).`,
+    fix:`expandable_segments:True, steady tensor shapes (pad buckets), paged KV with fixed block sizes, pre-allocate workspaces. Win: removes the intermittent ${(step*0.22).toFixed(0)} ms stalls → p99 back near p50.`};
+}
+function S_healthy(){
+  const step=rnd(44,56);
+  const segs=[]; let t=2;
+  for(let i=0;i<2;i++){healthyStep(segs,t,step);t+=step+0.6;}
+  return {win:t+2,segs,
+    q:`8×H100 DDP pretraining step after an optimization pass; the team asks "what's next?" Two steps shown. What's your read?`,
+    final:`Healthy trace — >95% compute occupancy, all-reduce fully overlapped with backward, no host gaps. The timeline has nothing left to give.`,
+    sig:`Dense compute rows with only sub-0.1 ms gaps, NCCL buckets interleaved WITH backward (not after), quiet CPU row, small step-boundary cost. Knowing when to STOP reading the timeline is part of the skill.`,
+    conf:`Gap analysis: step time − GPU busy ≈ ~2%. MFU arithmetic: if measured MFU is still low with a trace like this, the loss is INSIDE kernels (shapes/precision) — go to Nsight Compute, or accept the roofline.`,
+    fix:`Next lever is not the schedule: check the dominant GEMM's efficiency vs roofline, precision (bf16→fp8), or scale batch. Beware inventing pathologies a clean trace doesn't show — in the interview, saying "this trace is healthy, here's how I know" scores.`};
+}
+
+const GENS=[S_unoverlapped,S_starvation,S_launchbound,S_straggler,S_membound,S_syncstall,S_bubble,S_alloc,S_healthy,S_healthy];
+let order=[],tid=null,t=120;
+const $=id=>document.getElementById(id);
+const CLS={compute:"var(--compute)",comm:"var(--comm)",host:"var(--host)",mem:"var(--mem)"};
+
+function render(tr){
+  const W=840,LAB=120,rowH=34,pad=6,H=ROWNAMES.length*rowH+26;
+  const x=ms=>LAB+(ms/tr.win)*(W-LAB-8);
+  let s=`<svg id="trace" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`;
+  for(let g=0;g<=tr.win;g+=10)s+=`<line class="gridline" x1="${x(g)}" y1="0" x2="${x(g)}" y2="${H-20}"/><text class="axis" x="${x(g)+2}" y="${H-8}">${g} ms</text>`;
+  ROWNAMES.forEach((n,i)=>{s+=`<text class="rowlabel" x="4" y="${i*rowH+rowH/2+4}">${n}</text><line class="gridline" x1="${LAB}" y1="${(i+1)*rowH}" x2="${W}" y2="${(i+1)*rowH}"/>`;});
+  for(const sg of tr.segs){
+    if(!sg.c)continue;
+    const x0=x(sg.s),w=Math.max(x(sg.e)-x0,1.2),y=sg.r*rowH+pad;
+    s+=`<rect x="${x0}" y="${y}" width="${w}" height="${rowH-2*pad}" rx="1.5" fill="${CLS[sg.c]}"/>`;
+    if(sg.l&&w>60)s+=`<text class="seglabel" x="${x0+3}" y="${y+rowH/2-pad+3.5}">${sg.l}</text>`;
+  }
+  s+=`</svg>`;
+  document.getElementById("trace").outerHTML=s;
+}
+function tick(){t--;const m=Math.floor(Math.abs(t)/60),s=Math.abs(t)%60;$("timer").textContent=(t<0?"−":"")+m+":"+String(s).padStart(2,"0");$("timer").classList.toggle("over",t<0);}
+function newTrace(){
+  if(!order.length)order=GENS.map((_,i)=>i).sort(()=>Math.random()-0.5);
+  const p=GENS[order.pop()]();
+  $("scenario").innerHTML=p.q; render(p);
+  $("final").textContent=p.final;
+  $("body").innerHTML=`<h3>The signature</h3><p>${p.sig}</p><h3>Confirming measurement</h3><p>${p.conf}</p><h3>Fix &amp; expected win</h3><p>${p.fix}</p>`;
+  $("answer").classList.remove("show");
+  clearInterval(tid);t=120;$("timer").textContent="2:00";$("timer").classList.remove("over");
+  tid=setInterval(tick,1000);
+}
+$("new").addEventListener("click",newTrace);
+$("reveal").addEventListener("click",()=>{$("answer").classList.add("show");clearInterval(tid);});
+</script>
