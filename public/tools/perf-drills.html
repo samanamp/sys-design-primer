@@ -90,6 +90,9 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 <div class="formula">Decode step, batch 1: bytes/token ≈ <b>params·dtype_bytes + KV read</b>, &nbsp; KV = 2·layers·kv_heads·head_dim·seqlen·kv_bytes &nbsp;⇒&nbsp; tok/s ceiling = <b>BW / bytes_per_token</b></div>
 <div class="formula">Prefill attention: AI grows with seqlen → compute-bound. Decode attention/GEMV: AI ≈ 1–2 FLOP/byte → hopelessly memory-bound; batching raises AI ≈ batch size.</div>
 <div class="formula">Tile fit: smem_bytes = stages·(Bm·Bk + Bk·Bn)·dtype_bytes &nbsp;·&nbsp; accum regs/thread = Bm·Bn·4 / threads &nbsp;(limit 255 regs, 64K/SM)</div>
+<div class="formula">Ring all-reduce: time = <b>2·(n−1)/n · bytes / link_BW</b> ≈ 2·bytes/BW for large n (bandwidth-optimal, latency ignored)</div>
+<div class="formula">Training: FLOPs = <b>6·P·tokens</b> (fwd 2 + bwd 4) &nbsp;·&nbsp; MFU = achieved / peak &nbsp;·&nbsp; step time = 6·P·batch_tokens / (MFU·peak·chips)</div>
+<div class="formula">Memory: inference ≈ P·dtype_bytes + KV &nbsp;·&nbsp; Adam mixed-precision training ≈ <b>16 B/param</b> (2 wt + 2 grad + 12 optim/master) + activations</div>
 </section>
 
 <section>
@@ -180,7 +183,53 @@ function tile(){
       `Accumulator = Bm·Bn·4 B = ${(Bm*Bn*4/1024).toFixed(0)} KB ÷ ${threads} threads = ${Math.round(regs)} regs/thread ${regs<=255?'≤':'>'} 255`,
       `${fits?'Both budgets OK — also check occupancy: one block uses '+(100*smem/cap).toFixed(0)+'% of SM smem.':'Reduce stages, shrink Bk, or split the accumulator across more threads.'}`]};
 }
-const GENS=[gemm,decode,rooflineQ,tile];
+function allreduce(){
+  const n=pick([8,16,64,256]),m=pick(MODELS),bw=pick([{name:"NVLink-class 450 GB/s",v:450e9},{name:"ICI/IB-class 100 GB/s",v:100e9}]);
+  const bytes=2*m.P, t=2*(n-1)/n*bytes/bw.v;
+  return {cat:"Collective: ring all-reduce",
+    q:`Data-parallel all-reduce of bf16 gradients for ${m.name} across <span class="mono">${n}</span> chips, per-chip interconnect BW ${bw.name}. How long does the bandwidth-optimal ring take?`,
+    final:`≈ ${(t*1000).toFixed(0)} ms per step`,
+    steps:[`Gradient bytes = ${fmt(m.P)} params × 2 B = ${fmt(bytes)} B`,
+      `Ring all-reduce moves 2·(n−1)/n ≈ 2× the data through each link: ${fmt(2*(n-1)/n*bytes)} B`,
+      `Time = ${fmt(2*(n-1)/n*bytes)} ÷ ${fmt(bw.v)}B/s ≈ ${(t*1000).toFixed(0)} ms`,
+      `Sanity: for large n this is just 2·bytes/BW — the n-dependence nearly cancels. Compare against compute time per step to see if comms can hide behind backprop.`]};
+}
+function training(){
+  const m=pick(MODELS),chip=pick(CHIPS),chips=pick([256,1024,4096]),mfu=pick([0.3,0.4,0.5]);
+  const btok=pick([4,8,16])*1e6;
+  const t=6*m.P*btok/(mfu*chip.tf*1e12*chips);
+  return {cat:"Training step / MFU",
+    q:`Training ${m.name} on <span class="mono">${chips}</span>× ${chip.name} at ${(mfu*100).toFixed(0)}% MFU, global batch ${btok/1e6}M tokens. Step time?`,
+    final:`≈ ${t.toFixed(1)} s/step`,
+    steps:[`FLOPs/step = 6·P·tokens = 6 · ${fmt(m.P)} · ${fmt(btok)} = ${fmt(6*m.P*btok)}`,
+      `Effective FLOP/s = ${(mfu*100).toFixed(0)}% · ${chip.tf} TF · ${chips} chips = ${fmt(mfu*chip.tf*1e12*chips)}/s`,
+      `Step time = ${fmt(6*m.P*btok)} ÷ ${fmt(mfu*chip.tf*1e12*chips)} ≈ ${t.toFixed(1)} s`,
+      `Same identity backwards gives MFU from measured tokens/s: MFU = 6·P·tok/s ÷ (peak·chips).`]};
+}
+function kvcap(){
+  const m=pick(MODELS),chip=pick([{name:"H100 (80 GB)",gb:80},{name:"MI300X (192 GB)",gb:192},{name:"Trillium (32 GB)",gb:32}]);
+  const seq=pick([4096,8192,16384]);
+  const w=2*m.P, perSeq=2*m.L*m.kvh*m.d*seq*2, free=chip.gb*1e9-w, cap=Math.floor(free/perSeq);
+  const fits=free>0;
+  return {cat:"KV-cache capacity",
+    q:`${m.name} in bf16 on one ${chip.name}, bf16 KV cache, max context <span class="mono">${seq}</span>. How many concurrent sequences fit?`,
+    final:fits?`≈ ${cap} sequences`:`<span class="verdict-bad">weights alone don't fit (${fmt(w)}B) — must shard</span>`,
+    steps:[`Weights = ${fmt(m.P)} × 2 B = ${fmt(w)} B; free HBM ≈ ${fmt(Math.max(free,0))} B (ignoring activations/fragmentation)`,
+      `KV per sequence = 2 · ${m.L} · ${m.kvh} · ${m.d} · ${seq} · 2 B = ${fmt(perSeq)} B`,
+      fits?`Capacity ≈ ${fmt(free)} ÷ ${fmt(perSeq)} ≈ ${cap} sequences — this bounds your batch size, which bounds decode AI, which bounds throughput.`:`Weights exceed HBM: needs tensor/pipeline parallelism before KV even enters the picture.`]};
+}
+function memfit(){
+  const m=pick(MODELS),chip=pick([{name:"H100 (80 GB)",gb:80},{name:"B200 (192 GB)",gb:192},{name:"TPU v5p (95 GB)",gb:95}]);
+  const chips=pick([8,16,64]);
+  const bytes=16*m.P, per=bytes/chips, fits=per<=chip.gb*1e9*0.75;
+  return {cat:"Training memory fit",
+    q:`Adam mixed-precision training of ${m.name}, fully sharded (ZeRO-3/FSDP) across <span class="mono">${chips}</span>× ${chip.name}. Model state per chip, and does it fit with room for activations (~25% headroom)?`,
+    final:`${fmt(per)}B/chip → <span class="${fits?'verdict-good':'verdict-bad'}">${fits?'fits':'does NOT fit'}</span>`,
+    steps:[`Model state = 16 B/param (2 bf16 weight + 2 grad + 4+4+4 Adam m/v/master fp32) = 16 · ${fmt(m.P)} = ${fmt(bytes)} B`,
+      `Sharded across ${chips} chips: ${fmt(per)} B/chip vs ${chip.gb} GB HBM`,
+      `${fits?'Fits with headroom for activations; checkpointing shrinks those further.':'Over budget — more chips, activation checkpointing won’t help (that’s activations, not model state); need more shards or 8-bit optimizer.'}`]};
+}
+const GENS=[gemm,decode,rooflineQ,tile,allreduce,training,kvcap,memfit];
 let idx=-1,tid=null,t=120;
 const $=id=>document.getElementById(id);
 function tick(){t--;const m=Math.floor(Math.abs(t)/60),s=Math.abs(t)%60;$("timer").textContent=(t<0?"−":"")+m+":"+String(s).padStart(2,"0");$("timer").classList.toggle("over",t<0);}

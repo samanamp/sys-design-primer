@@ -44,6 +44,16 @@ $$\text{attainable} = \min(\text{peak FLOP/s},\; \text{AI} \times \text{BW})$$
 
 $$\text{smem} = \text{stages} \cdot (B_m B_k + B_k B_n) \cdot b_{\text{dtype}}, \qquad \text{accum regs/thread} = \frac{B_m B_n \cdot 4}{\text{threads}}$$
 
+## Four more identities (distributed & capacity rounds)
+
+**Ring all-reduce.** Bandwidth-optimal time for $n$ chips: $t = \frac{2(n-1)}{n} \cdot \frac{\text{bytes}}{\text{link BW}} \approx \frac{2 \cdot \text{bytes}}{\text{BW}}$ for large $n$ — the $n$-dependence nearly cancels. Compare against backprop time to see whether comms hide behind compute.
+
+**Training FLOPs and MFU.** $\text{FLOPs} = 6 P T$ (forward 2, backward 4). MFU = achieved ÷ peak; step time $= \frac{6 P \cdot \text{batch tokens}}{\text{MFU} \cdot \text{peak} \cdot \text{chips}}$. Run it backwards to get MFU from measured tokens/s.
+
+**KV-cache capacity.** Concurrent sequences ≈ (HBM − weights) ÷ KV-per-sequence. This bounds batch size, which bounds decode arithmetic intensity, which bounds throughput — the whole serving-economics chain in one division.
+
+**Training memory.** Adam mixed precision ≈ **16 bytes/param** of model state (2 bf16 weight + 2 grad + 12 fp32 optimizer/master), sharded by ZeRO-3/FSDP degree, plus activations (shrinkable via checkpointing — see [Activation Checkpointing](/optimization/11-activation-checkpointing/)).
+
 ## Drill protocol
 
 1. 15 minutes daily, cold, on paper. Rotate through the four categories.
