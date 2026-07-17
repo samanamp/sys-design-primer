@@ -95,25 +95,7 @@ Optimizing prefill without managing KV cache may improve TTFT but not concurrenc
 
 ## 3. KV Head Reduction: MQA and GQA
 
-Standard multi-head attention stores keys and values per attention head:
-
-$$
-H_{kv} = H_q
-$$
-
-Multi-Query Attention stores one KV head:
-
-$$
-H_{kv} = 1
-$$
-
-Grouped-Query Attention stores several KV groups:
-
-$$
-1 < H_{kv} < H_q
-$$
-
-KV cache savings:
+Standard multi-head attention stores keys and values per attention head ($H_{kv} = H_q$). Multi-Query Attention stores one KV head, and Grouped-Query Attention stores several KV groups ($1 < H_{kv} < H_q$). The attention-variant math, quality tradeoffs, and uptraining story are covered in [the attention optimization article](/optimization/7-attention-optimization/). What matters for cache capacity planning is the savings factor:
 
 $$
 \text{savings factor} = \frac{H_q}{H_{kv}}
@@ -144,19 +126,7 @@ MLA:
   token -> compressed latent cache -> reconstruct K/V-like projections
 ```
 
-Simplified:
-
-$$
-c_t = W_D h_t
-$$
-
-where $c_t$ is the latent cache for token $t$. Later:
-
-$$
-k_t, v_t = f(c_t)
-$$
-
-DeepSeek-V2 and DeepSeek-V3 made MLA prominent, and DeepSeek-V3.2 continued the efficiency-focused lineage while adding sparse attention for long context.
+The projection math and architectural detail live in [the attention optimization article](/optimization/7-attention-optimization/). DeepSeek-V2 and DeepSeek-V3 made MLA prominent, and DeepSeek-V3.2 continued the efficiency-focused lineage while adding sparse attention for long context.
 
 MLA is powerful because it attacks the KV cache at the architecture level. But it is not a serving-only patch. It requires:
 
@@ -237,7 +207,7 @@ Prefix caching improves TTFT, GPU utilization, and cost, but requires routing:
 - Multi-tenant isolation must be respected.
 - Model/version/template changes invalidate cache keys.
 
-Modern production APIs increasingly expose or exploit prompt caching because it is one of the cleanest long-prompt optimizations.
+Modern production APIs increasingly expose or exploit prompt caching because it is one of the cleanest long-prompt optimizations. The canonical serving-side treatment, including scheduler and routing integration, is in [the LLM serving optimization article](/optimization/14-llm-serving-optimization/).
 
 ---
 
@@ -358,7 +328,7 @@ Costs:
 - More routing and orchestration.
 - Cache ownership and lifecycle complexity.
 
-Disaggregation is not the first optimization for every system. It pays off when prompt length variance and decode concurrency fight each other.
+Disaggregation is not the first optimization for every system. It pays off when prompt length variance and decode concurrency fight each other. The canonical treatment of disaggregated serving is in [the LLM serving optimization article](/optimization/14-llm-serving-optimization/).
 
 ---
 

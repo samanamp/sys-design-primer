@@ -308,7 +308,7 @@ Checklist:
 8. Re-benchmark end-to-end.
 ```
 
-Kernel optimization without system profiling can make the wrong thing faster.
+Kernel optimization without system profiling can make the wrong thing faster. For a deeper treatment of profiling workflows and kernel-level debugging, see [the performance debugging article](/optimization/17-perf-debugging/).
 
 ---
 

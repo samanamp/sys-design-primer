@@ -48,7 +48,7 @@ Training cluster
     +-- expert parallel groups
 ```
 
-"3D parallelism" often means data + tensor + pipeline. For long-context MoE models, teams may add context and expert parallelism, making the layout effectively 4D or 5D.
+"3D parallelism" often means data + tensor + pipeline. For long-context MoE models, teams may add context and expert parallelism, making the layout effectively 4D or 5D. For a deeper walkthrough of how these dimensions compose, see [the 4D parallelism primer](/llm-primers/10-4d-parallelism/).
 
 ---
 
@@ -186,35 +186,13 @@ Why it matters:
 - Attention needs access across sequence partitions.
 - Communication must exchange key/value or attention information.
 
-Context parallelism is useful when sequence length, not just model size, is the bottleneck.
+Context parallelism is useful when sequence length, not just model size, is the bottleneck. For a deeper treatment of ring/all-gather attention mechanics, see [the context parallelism primer](/llm-primers/9-context-parallelism/).
 
 ---
 
 ## 7. Expert Parallelism
 
-Expert parallelism distributes MoE experts across devices. Tokens are routed to the devices that hold their selected experts.
-
-Communication:
-
-$$
-\text{all-to-all token dispatch}
-$$
-
-```text
-Tokens on all GPUs
-      |
-      v
-Router assigns experts
-      |
-      v
-All-to-all sends tokens to expert owners
-      |
-      v
-Experts compute
-      |
-      v
-All-to-all returns outputs
-```
+Expert parallelism distributes MoE experts across devices. Tokens are routed to the devices that hold their selected experts, which turns every MoE layer into an all-to-all dispatch, dense expert compute, then an all-to-all combine. The full mechanics — routing, capacity factors, load balancing, and the dispatch/combine flow — are covered in [the MoE article](/optimization/6-mixture-of-experts/).
 
 Expert parallelism is mandatory for large MoE models, but all-to-all can dominate if routing is imbalanced or interconnect is weak.
 

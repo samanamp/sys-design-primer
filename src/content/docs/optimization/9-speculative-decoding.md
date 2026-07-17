@@ -60,6 +60,8 @@ $$
 
 and proposer overhead does not erase the win.
 
+For a deeper walkthrough of the acceptance sampling mechanics, see [the speculative decoding primer](/llm-primers/5-speculative-decod/).
+
 ---
 
 ## 2. Basic Algorithm

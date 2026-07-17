@@ -27,7 +27,7 @@ Before any planning, what do frontier teams actually do for TTFT in 2026? The la
 
 **NVFP4/MXFP4 on Blackwell.** NVFP4 uses 16-element blocks with E4M3 scale + FP32 second-level scaling — finer-grained than MXFP4's 32-element E8M0 blocks. MR-GPTQ achieves ~2.0–2.2× end-to-end speedup vs BF16 on 70B Llama, with academic benchmark deltas inside ±0.01. NVFP4 helps prefill (compute-bound) substantially.
 
-**Speculative decoding has consolidated on EAGLE-3** — 2-6× decode speedup, supported in vLLM/SGLang/TRT-LLM. **Decode-only.** Frontier teams treat it as a separate workstream from TTFT.
+**Speculative decoding has consolidated on EAGLE-3** — the EAGLE-3 paper reports roughly 3-6.5× decode speedup over vanilla autoregressive decoding, supported in vLLM/SGLang/TRT-LLM. **Decode-only.** Frontier teams treat it as a separate workstream from TTFT.
 
 **Goodput is the metric that matters.** Fraction of GPU-seconds producing tokens within SLO. Frontier teams have moved off raw throughput.
 
@@ -97,7 +97,7 @@ For each, what it does, expected TTFT impact, engineering cost, dependencies, ri
 
 ### 4.1 Prefix Caching + Cache-Aware Routing — First Move
 
-**What:** Cache the KV state of shared prefixes (system prompt, tool schemas, repeated few-shot blocks, previous user turns). On a hit, skip prefill for the cached span; only the suffix needs computing. RadixAttention (SGLang), vLLM automatic prefix caching, or LMCache for cross-engine sharing.
+**What:** Cache the KV state of shared prefixes (system prompt, tool schemas, repeated few-shot blocks, previous user turns). On a hit, skip prefill for the cached span; only the suffix needs computing. RadixAttention (SGLang), vLLM automatic prefix caching, or LMCache for cross-engine sharing. (Canonical treatment: [LLM serving optimization](/optimization/14-llm-serving-optimization/).)
 
 **Expected TTFT impact:** highly workload-dependent.
 - 4K shared system prompt, fresh prefill on 70B TP=4 H100: ~250–400ms.
@@ -135,7 +135,7 @@ For each, what it does, expected TTFT impact, engineering cost, dependencies, ri
 
 ### 4.4 Prefill–Decode Disaggregation — Conditional
 
-**What:** Mooncake/DistServe/Splitwise/Dynamo: separate prefill GPU pool and decode GPU pool. Transfer KV via NVLink (same rack) or RDMA/EFA (cross-node).
+**What:** Mooncake/DistServe/Splitwise/Dynamo: separate prefill GPU pool and decode GPU pool. Transfer KV via NVLink (same rack) or RDMA/EFA (cross-node). (Canonical treatment: [LLM serving optimization](/optimization/14-llm-serving-optimization/).)
 
 **Expected TTFT impact:** Pays off when prompt-length variance is the dominant p99 driver. Each pool can be sized and scheduled independently — prefill bursts don't degrade decode SLOs, and vice versa. Reported: NVIDIA Dynamo on GB200 NVL72 shows ~7× throughput at iso-latency for reasoning workloads.
 
@@ -181,7 +181,7 @@ For each, what it does, expected TTFT impact, engineering cost, dependencies, ri
 
 ### 4.9 Speculative Decoding — Not a TTFT Optimization
 
-**What:** EAGLE-3, Medusa, MTP. Speeds up *decode* by 2–6×.
+**What:** EAGLE-3, Medusa, MTP. Speeds up *decode* — the EAGLE-3 paper reports roughly 3–6.5×.
 
 **TTFT impact:** ~zero direct. Indirect: faster decode → engines free up faster → queue time drops marginally. At our utilization, maybe 30–60ms on p99.
 

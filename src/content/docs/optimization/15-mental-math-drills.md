@@ -14,7 +14,7 @@ Interviewers for ML performance roles use fumbled arithmetic as a shallowness si
 | Chip | TFLOP/s (BF16) | HBM BW (TB/s) | Ridge (FLOP/B) | HBM (GB) |
 |---|---:|---:|---:|---:|
 | NVIDIA H100 SXM | 989 | 3.35 | ~295 | 80 |
-| NVIDIA B200 | 2,250 | 8.0 | ~281 | 192 |
+| NVIDIA B200 | 2,250 | 7.7 | ~292 | 180 |
 | AMD MI300X | 1,307 | 5.3 | ~247 | 192 |
 | TPU v5p | 459 | 2.76 | ~166 | 95 |
 | TPU v6e (Trillium) | 918 | 1.64 | ~560 | 32 |

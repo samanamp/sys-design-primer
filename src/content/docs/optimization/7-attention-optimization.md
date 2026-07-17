@@ -219,7 +219,7 @@ $$
 k_t = W_{UK} c_t,\quad v_t = W_{UV} c_t
 $$
 
-The actual DeepSeek implementation is more nuanced, especially around RoPE dimensions and query/key decomposition, but the optimization principle is simple:
+The actual DeepSeek implementation is more nuanced, especially around RoPE dimensions and query/key decomposition — see [the MLA primer](/llm-primers/6-mla-attention/) for a deeper walkthrough — but the optimization principle is simple:
 
 > Cache a smaller latent representation instead of full expanded KV tensors.
 
@@ -378,29 +378,7 @@ This table is why "attention optimization" needs a workload. The right answer fo
 
 ## 9. KV Cache Math
 
-Suppose:
-
-- Batch size $B = 32$
-- Sequence length $L = 32{,}768$
-- Layers $N_L = 80$
-- Query heads $H_q = 64$
-- KV heads $H_{kv} = 8$
-- Head dimension $d_h = 128$
-- BF16 cache, 2 bytes per element
-
-KV cache:
-
-$$
-2 \cdot B \cdot L \cdot N_L \cdot H_{kv} \cdot d_h \cdot 2
-$$
-
-The first factor 2 is keys plus values. Plugging in:
-
-$$
-2 \cdot 32 \cdot 32768 \cdot 80 \cdot 8 \cdot 128 \cdot 2
-$$
-
-This is hundreds of GB of KV cache. That is why KV cache design is not a detail. It determines how many concurrent long-context users fit on the serving fleet.
+The full KV capacity formula, a worked example at realistic batch and sequence sizes, and the serving-side consequences (paging, prefix caching, eviction, compression) live in [the KV cache article](/optimization/8-kv-cache-long-context/). The punchline for attention design: at 70B-class scale with long context and real concurrency, KV cache runs to hundreds of GB, so it determines how many concurrent long-context users fit on the serving fleet.
 
 Reducing $H_{kv}$ from 64 to 8 cuts KV cache by 8x. Compressing KV into MLA-style latents can reduce it further depending on latent dimension. Sparse attention or sliding windows can reduce which cached tokens must be read.
 

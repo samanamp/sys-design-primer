@@ -643,7 +643,69 @@ The last one is often the only metric product leaders care about.
 
 ---
 
-## 16. Important Papers to Read
+## 16. MoE Inference Systems in the Wide-EP Era
+
+Sections 9-11 covered the mechanics: expert parallelism, all-to-all, and memory. Since roughly 2025, serving large MoEs (DeepSeek-V3/R1-class models with hundreds of routed experts) has produced a distinct systems playbook. This is what a staff-level answer about *serving* MoE should contain.
+
+### Expert-parallel load balancing (EPLB)
+
+Static expert placement assumes uniform routing. Real traffic does not route uniformly: some experts are hot for a given workload mix, and the GPU that owns a hot expert becomes the straggler for the whole layer. DeepSeek's open-source **[EPLB](https://github.com/deepseek-ai/EPLB)** attacks this with **redundant experts**: heavy-loaded experts are *replicated*, and the replicas are packed across GPUs so that per-GPU expected load is even. The output is a mapping from logical experts to physical expert slots, recomputed periodically from observed routing statistics.
+
+EPLB ships two policies:
+
+- **Hierarchical load balancing.** Used when node count evenly divides expert groups: pack expert groups onto nodes first (exploiting group-limited routing so a token's experts stay on few nodes), then replicate and place within each node. This minimizes inter-node all-to-all traffic. It fits **prefill**, where expert-parallel degree is smaller.
+- **Global load balancing.** Replicate experts globally, ignoring groups. It fits **decode**, where EP degree is large and balance matters more than locality.
+
+The systems tradeoff: rebalancing costs weight movement and a brief disruption, and it chases a moving target. Rebalance too often and you pay copy overhead; too rarely and workload shifts (a burst of code traffic, a new tenant) re-create hot experts. vLLM and SGLang both implement EPLB-style rebalancing with a configurable statistics window and rebalance interval — those two knobs are the thing to tune, and per-expert load skew over time is the thing to watch.
+
+### DeepEP-style all-to-all kernels
+
+Generic all-to-all collectives are a poor fit for MoE dispatch/combine: payloads are small, irregular, and latency-critical during decode. **[DeepEP](https://github.com/deepseek-ai/DeepEP)** is the reference open-source library for EP communication and shapes how vLLM/SGLang do wide-EP:
+
+- **Normal (high-throughput) mode** targets training and **prefill**: kernels forward via NVLink within a node and RDMA across nodes, sustaining near-line-rate bandwidth (hundreds of GB/s intranode over NVLink, tens of GB/s per GPU over CX7-class RDMA internode).
+- **Low-latency mode** targets **decode**: pure-RDMA dispatch/combine kernels tuned for tiny per-step batches, with a hook-based mechanism that overlaps communication with compute without occupying SMs.
+- **FP8 dispatch** with higher-precision combine cuts wire bytes roughly in half where the model tolerates it.
+
+The staff point: EP communication is a specialized kernel problem, not a "call NCCL" problem. If your all-to-all occupies SMs, it steals compute from the experts it is feeding; measure SM occupancy of communication, not just link bandwidth.
+
+### Prefill vs decode want different EP layouts
+
+Disaggregated prefill/decode (see the serving guide) interacts directly with MoE:
+
+- **Prefill** has many tokens per step, so each expert sees a healthy GEMM even at modest EP degree. Smaller EP groups, hierarchical placement, throughput-mode kernels.
+- **Decode** has roughly one token per request per step. To keep per-expert batches efficient you aggregate tokens across many requests, which pushes toward **large EP degrees** (EP=64 and beyond), global balancing, and low-latency kernels.
+
+This is why production DeepSeek-class deployments run different parallelism configurations on the prefill pool and the decode pool, connected by KV transfer.
+
+### Wide-EP on NVL72-class systems
+
+GB200 NVL72 puts 72 GPUs on one NVLink domain, which changes the placement calculus: "cross-node" all-to-all penalties mostly disappear inside the rack, so very wide EP becomes practical. Published deployments ([LMSYS/SGLang](https://lmsys.org/blog/2025-06-16-gb200-part-1/), [vLLM](https://blog.vllm.ai/2025/12/17/large-scale-serving.html), [NVIDIA](https://developer.nvidia.com/blog/scaling-large-moe-models-with-wide-expert-parallelism-on-nvl72-rack-scale-systems/)) report that wide-EP with disaggregated prefill/decode delivers multiples of per-GPU decode throughput versus small-EP baselines, because fewer experts per GPU means less weight memory per GPU, bigger per-expert batches, and more HBM left for KV cache. The failure mode of wide EP is the flip side: the blast radius of one slow or failed GPU is now the entire EP group, so stragglers, elastic EP (shrinking the group on failure), and rebalancing become availability features, not just performance features.
+
+### Expert offload and paging
+
+When total parameters exceed GPU memory, experts can live in host memory (or NVMe) and be paged in on demand. The tradeoffs:
+
+- Routing is only known per layer at runtime, so prefetch is speculative; mispredicted experts stall the layer on PCIe latency.
+- Skewed routing helps here (hot experts stay resident, cold ones page), which is the mirror image of serving-cluster EPLB, where skew hurts.
+- Offload is viable for low-QPS, single-node, or edge deployments; at high QPS the PCIe traffic serializes and destroys decode ITL.
+
+Treat offload as a capacity tool, not a performance tool. Measure page-in rate per decode step; if it is not near zero at steady state, latency will not be stable.
+
+### How routing skew shows up as tail latency
+
+An MoE layer completes when its *slowest* expert rank completes. So imbalance does not show up as lower average throughput first — it shows up as **p99 ITL**. The mechanism: a routing burst overloads one GPU's experts, that rank's GEMM and combine finish late, every co-batched request in the EP group waits, and the stall repeats each layer. What to measure in production:
+
+- Per-GPU expert load per window (tokens dispatched), and its max/mean ratio — the *balancedness* metric; 1.0 is perfect.
+- Time gap between fastest and slowest rank per MoE layer (straggler time).
+- p99 ITL correlated against balancedness — if they move together, you have a routing-skew problem, and EPLB/redundant experts are the fix; if not, look at all-to-all or scheduler first.
+
+Staff phrase:
+
+> In wide-EP serving, the router's imbalance becomes everyone's tail latency. Load balancing is no longer a training loss — it is a runtime placement service with its own control loop.
+
+---
+
+## 17. Important Papers to Read
 
 Read these in roughly this order.
 
@@ -670,7 +732,7 @@ Read these in roughly this order.
 
 ---
 
-## 17. The Staff Engineer Summary
+## 18. The Staff Engineer Summary
 
 Mixture of Experts is one of the most important sparse architectures because it scales total model capacity without scaling every token's compute linearly.
 

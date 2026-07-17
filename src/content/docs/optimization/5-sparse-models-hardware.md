@@ -137,77 +137,14 @@ Dense hardware is a high bar. Sparsity has to be regular enough to keep the mach
 
 ---
 
-## 4. Unstructured Sparsity: Great Compression, Hard Acceleration
+## 4. Unstructured and Semi-Structured Weight Sparsity
 
-Unstructured sparsity removes individual scalar weights:
+Weight sparsity — unstructured pruning, structured pruning, and N:M patterns such as NVIDIA's 2:4 — is covered in depth in [the pruning article](/optimization/2-pruning/), including the saliency methods, quality tradeoffs, and ASCII-level shape differences. The short version for this article's hardware lens:
 
-```text
-Dense:
-  x x x x x x x x
-  x x x x x x x x
-  x x x x x x x x
+- **Unstructured sparsity** removes individual scalar weights. It is quality-friendly and great compression, but random zeros break the regularity dense hardware likes. It pays off mainly when memory footprint matters more than latency, on CPU or specialized sparse hardware, or at very high sparsity with mature sparse kernels.
+- **Semi-structured (2:4) sparsity** constrains every group of four weights to exactly two nonzeros, which NVIDIA Sparse Tensor Cores can skip using compressed values plus metadata. NVIDIA documents 2:4 support through Sparse Tensor Cores, TensorRT, and cuSPARSELt, and PyTorch has semi-structured sparse tensor support for supported shapes and dtypes.
 
-Unstructured sparse:
-  x 0 x 0 0 x x 0
-  0 x 0 x x 0 0 x
-  x x 0 0 x 0 x 0
-```
-
-This is flexible. It usually preserves quality better than structured pruning at the same parameter sparsity because the optimizer can remove the least important individual weights.
-
-The problem is execution. Random zeros break the regularity that dense hardware likes. You need:
-
-- Sparse storage format.
-- Sparse matrix kernels.
-- Efficient metadata representation.
-- Good memory locality.
-- Enough sparsity to offset overhead.
-- Supported dtypes and shapes.
-
-Unstructured sparsity is strongest when:
-
-- Memory footprint matters more than latency.
-- Running on CPU or specialized sparse hardware.
-- Sparsity is extremely high.
-- Matrices are large enough to amortize overhead.
-- The serving stack has mature sparse kernels.
-
-For GPU LLM inference, unstructured sparsity is often more compelling as compression than as raw speedup.
-
----
-
-## 5. Semi-Structured Sparsity: The Hardware Compromise
-
-Semi-structured sparsity restricts the sparse pattern so hardware can accelerate it. The best-known example is NVIDIA's 2:4 sparsity on Ampere and later GPUs.
-
-In 2:4 sparsity, every group of four weights contains exactly two nonzero values:
-
-$$
-\|M_g\|_0 = 2
-$$
-
-for each group $g$ of four weights.
-
-```text
-2:4 groups:
-
-  [x 0 x 0] [0 x x 0] [x x 0 0] [0 x 0 x]
-     2/4       2/4       2/4       2/4
-```
-
-This pattern is less flexible than arbitrary sparsity, but it is predictable. NVIDIA Sparse Tensor Cores can use the compressed values plus metadata to skip the zero entries. NVIDIA documents 2:4 support through Sparse Tensor Cores, TensorRT, and cuSPARSELt, and PyTorch has semi-structured sparse tensor support for supported shapes and dtypes.
-
-The caveat is that the theoretical maximum is not the product result. A 2x sparse math rate does not mean a 2x end-to-end latency improvement. Attention, KV cache, layernorm, routing, memory movement, sampling, and framework overhead still exist.
-
-Semi-structured sparsity is credible when:
-
-- The model can tolerate the strict pattern.
-- The target hardware supports the pattern.
-- The deployment runtime selects sparse tactics.
-- The sparse layers dominate runtime.
-- Quality recovery is possible with fine-tuning or distillation.
-
-It is not credible when someone says "50% sparse, therefore 2x faster" without a runtime benchmark.
+The hardware caveat is the same in both cases: the theoretical math rate is not the product result. A 2x sparse math rate does not mean a 2x end-to-end latency improvement, because attention, KV cache, layernorm, routing, memory movement, sampling, and framework overhead still exist. It is not credible when someone says "50% sparse, therefore 2x faster" without a runtime benchmark.
 
 ---
 
@@ -321,63 +258,9 @@ Staff-level point:
 
 ## 8. Mixture of Experts: Sparse Parameters, Dense Experts
 
-Mixture of Experts is a different kind of sparsity. The model may have many parameters, but each token activates only a subset of experts.
+Mixture of Experts is a different kind of sparsity: the model may have many parameters, but a router activates only a few experts per token, and each selected expert is usually a dense MLP. Routing math, capacity factors, load balancing, expert parallelism, and serving are covered in depth in [the MoE article](/optimization/6-mixture-of-experts/).
 
-For token representation $x$, a router selects top-$k$ experts:
-
-$$
-y = \sum_{i \in \text{TopK}(r(x))} g_i(x) E_i(x)
-$$
-
-where:
-
-- $r(x)$ is the router score.
-- $E_i$ is expert $i$.
-- $g_i(x)$ is the routing weight.
-
-If there are 64 experts and each token uses 2, the model is sparse over experts but each selected expert is usually a dense MLP.
-
-```text
-Token batch
-    |
-    v
-Router
-    |
-    +-- expert 3  -> dense FFN
-    +-- expert 17 -> dense FFN
-    +-- others skipped
-```
-
-MoE helps scale parameter count without scaling per-token compute proportionally. It is central to many large modern models.
-
-The hardware reality is communication:
-
-```text
-Tokens on GPU A
-      |
-      | all-to-all dispatch
-      v
-Experts spread across GPUs
-      |
-      | expert dense compute
-      v
-all-to-all combine
-      |
-      v
-Tokens back to original order
-```
-
-MoE bottlenecks:
-
-- All-to-all communication.
-- Expert load imbalance.
-- Token dropping or padding.
-- Small expert batch sizes.
-- Router instability.
-- Capacity factor tuning.
-- Expert parallel placement.
-
-Switch Transformer simplified routing with top-1 experts and showed the power of sparse expert models at scale. But in production, MoE performance is not just "active parameters." It is router quality, expert placement, communication overlap, and batching.
+For this article's hardware lens, the point is that MoE's sparsity is expert-level, and its cost is communication: tokens must be dispatched to the GPUs that own their selected experts via all-to-all, computed densely, then combined back. All-to-all overhead, expert load imbalance, token dropping, small expert batches, and placement can erase the compute savings. In production, MoE performance is not just "active parameters." It is router quality, expert placement, communication overlap, and batching.
 
 ---
 
@@ -612,7 +495,7 @@ Read these in roughly this order.
 1. **[NVIDIA Ampere structured sparsity overview](https://developer.nvidia.com/blog/accelerating-inference-with-sparsity-using-ampere-and-tensorrt/)**.  
    Practical grounding for 2:4 sparsity and Sparse Tensor Cores.
 
-2. **[cuSPARSELt](https://developer.nvidia.com/cuSPARSE)** and **[TensorRT structured sparsity docs](https://docs.nvidia.com/deeplearning/tensorrt/10.13.2/inference-library/work-with-dla.html)**.  
+2. **[cuSPARSELt](https://docs.nvidia.com/cuda/cusparselt/index.html)** and **[TensorRT structured sparsity docs](https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/data-formats-tensors.html#structured-sparsity)**.  
    Useful for understanding when sparse patterns are actually selected by runtime libraries.
 
 3. **[PyTorch semi-structured sparsity tutorial](https://docs.pytorch.org/tutorials/advanced/semi_structured_sparse.html)**.  

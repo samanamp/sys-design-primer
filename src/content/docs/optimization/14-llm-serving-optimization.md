@@ -228,6 +228,8 @@ Costs:
 
 Disaggregation is powerful for high-scale long-context workloads, but overkill for small deployments.
 
+> **Cross-reference.** This file is the canonical reference for disaggregation, prefix caching, and the rest of the serving stack. For an applied, end-to-end worked example that puts these pieces together against a concrete latency target, see [TTFT Optimization](/optimization/1-ttft-optim/).
+
 ---
 
 ## 8. Speculative Decoding in Serving
@@ -292,7 +294,58 @@ The model architecture increasingly dictates serving architecture. MLA, DeepSeek
 
 ---
 
-## 11. Failure Modes
+## 11. Benchmarking Methodology
+
+Section 1 defined goodput. This section is about how to *measure* it without fooling yourself. Most serving benchmarks are wrong in ways that flatter the system under test.
+
+### MLPerf Inference scenarios
+
+[MLPerf Inference](https://mlcommons.org/benchmarks/inference-datacenter/) is the standardized industry reference, and its scenario taxonomy is a useful vocabulary even for internal benchmarks:
+
+- **Offline:** all requests available up front, no latency bound. Measures pure throughput; batching and scheduling dominate. This is the ceiling, not a user experience.
+- **Server:** requests arrive on a Poisson schedule; the metric is the highest arrival rate the system sustains while meeting per-request latency constraints. For LLM benchmarks the constraints are on TTFT and TPOT (time per output token) — e.g. Llama 2 70B Server allows TTFT ≤ 2 s and TPOT ≤ 200 ms.
+- **Interactive:** a server-style category added for chat-like workloads with much tighter bounds — for Llama 2 70B, TTFT ≤ 450 ms and TPOT ≤ 40 ms (25 tokens/s/user). The same hardware often sustains far lower QPS under Interactive constraints than Server ones, which is exactly the throughput-latency tradeoff made visible.
+
+The lesson to steal: a benchmark result is meaningless without its scenario and its latency constraints attached.
+
+### Closed-loop vs open-loop load generation
+
+- **Closed-loop:** N concurrent clients, each sends the next request only after the previous one completes. Load automatically backs off when the system slows down.
+- **Open-loop:** requests arrive on an independent schedule (e.g. Poisson at a fixed rate) regardless of whether earlier requests finished. Load does not back off.
+
+Closed-loop generators systematically under-report tail latency, a failure known as **coordinated omission**: when the server stalls, the blocked clients stop issuing requests, so the stall window contributes a handful of slow samples instead of the many slow requests real independent users would have experienced. The measured p99 looks fine while real users would have been queueing. Production traffic is open-loop — users do not coordinate with your GPU — so latency claims should come from open-loop (or at least rate-driven) generation. Closed-loop concurrency sweeps are still useful for mapping the throughput ceiling; just do not read SLO percentiles off them.
+
+### Harnesses
+
+You rarely need to build a load generator. The common ones follow the same shape — a client that replays a workload against an OpenAI-compatible endpoint and reports TTFT/ITL/throughput percentiles:
+
+- **vllm bench serve** (built into vLLM): request-rate-driven benchmarking with real or synthetic datasets.
+- **genai-perf** (NVIDIA): concurrency- and rate-based profiles, token-level metrics.
+- **inference-perf** (Kubernetes WG Serving): declaratively specified, explicitly open-loop-capable load generation for SLO-style evaluation.
+
+Whichever you use, the harness matters less than what you hold fixed.
+
+### What to hold fixed
+
+Benchmark numbers are only comparable when these are pinned:
+
+- **Prompt and output length distributions.** Fixed 128/128 synthetic shapes bear no resemblance to production. Use the production histogram, or at least report the distribution used. Output length especially: it sets decode time and KV growth.
+- **Prefix-cache hit rate.** Sending the same prompt repeatedly gives near-100% cache hits and fictional TTFT. Either disable prefix caching or engineer the benchmark's hit rate to match production.
+- **Warm-up.** Exclude the first requests: weight loading, CUDA graph capture, JIT, cold caches. Steady state is the claim; measure steady state.
+- **Operating point.** Pick it deliberately. A saturation run (Offline-style) characterizes maximum throughput. A latency-bounded run (Server/Interactive-style) characterizes what you can actually sell. The knee of the latency-vs-rate curve is where systems differ most; sweep the rate and report the curve, not one point.
+- Sampling parameters, max tokens, streaming on/off, and engine flags — all of them change results and all belong in the report.
+
+### Reporting
+
+- Report **percentiles** (p50/p95/p99) for TTFT, ITL, and E2E — never means alone. Latency distributions are heavy-tailed; a mean TTFT can look healthy while p99 is 10x worse.
+- Report **goodput under the stated SLO** as the headline: requests (or tokens) per GPU-second that met the constraint, at the stated arrival rate.
+- Report the workload: length distributions, cache hit rate, arrival process, and scenario.
+
+A defensible claim looks like: "At 12 req/s Poisson with the production length mix and ~40% prefix hit rate, p99 TTFT is 380 ms, p99 ITL is 34 ms, and goodput is 1,400 tokens/GPU-second under the 500 ms / 40 ms SLO." Anything shorter is marketing.
+
+---
+
+## 12. Failure Modes
 
 ### Optimizing throughput while p99 gets worse
 
@@ -324,7 +377,7 @@ New replicas take too long to load weights and warm caches.
 
 ---
 
-## 12. Staff Checklist
+## 13. Staff Checklist
 
 For a serving optimization program:
 

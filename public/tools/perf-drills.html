@@ -74,7 +74,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 <table>
 <tr><th>Chip</th><th class="r">TFLOP/s (BF16)</th><th class="r">HBM BW (TB/s)</th><th class="r">Ridge (FLOP/B)</th><th class="r">HBM (GB)</th><th class="r">Shared/vector mem</th></tr>
 <tr><td>NVIDIA H100 SXM</td><td class="r">989</td><td class="r">3.35</td><td class="r ridge">~295</td><td class="r">80</td><td class="r">228 KB smem/SM · 132 SMs</td></tr>
-<tr><td>NVIDIA B200</td><td class="r">2,250</td><td class="r">8.0</td><td class="r ridge">~281</td><td class="r">192</td><td class="r">228 KB smem/SM</td></tr>
+<tr><td>NVIDIA B200</td><td class="r">2,250</td><td class="r">7.7</td><td class="r ridge">~292</td><td class="r">180</td><td class="r">228 KB smem/SM</td></tr>
 <tr><td>AMD MI300X</td><td class="r">1,307</td><td class="r">5.3</td><td class="r ridge">~247</td><td class="r">192</td><td class="r">64 KB LDS/CU · 304 CUs</td></tr>
 <tr><td>TPU v5p</td><td class="r">459</td><td class="r">2.76</td><td class="r ridge">~166</td><td class="r">95</td><td class="r">~128 MB CMEM/VMEM-class on-chip</td></tr>
 <tr><td>TPU v6e (Trillium)</td><td class="r">918</td><td class="r">1.64</td><td class="r ridge">~560</td><td class="r">32</td><td class="r">large on-chip VMEM</td></tr>
@@ -118,7 +118,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 <script>
 const CHIPS=[
  {name:"H100 SXM",tf:989,bw:3.35},
- {name:"B200",tf:2250,bw:8.0},
+ {name:"B200",tf:2250,bw:7.7},
  {name:"MI300X",tf:1307,bw:5.3},
  {name:"TPU v5p",tf:459,bw:2.76},
  {name:"Trillium (v6e)",tf:918,bw:1.64},
@@ -219,7 +219,7 @@ function kvcap(){
       fits?`Capacity ≈ ${fmt(free)} ÷ ${fmt(perSeq)} ≈ ${cap} sequences — this bounds your batch size, which bounds decode AI, which bounds throughput.`:`Weights exceed HBM: needs tensor/pipeline parallelism before KV even enters the picture.`]};
 }
 function memfit(){
-  const m=pick(MODELS),chip=pick([{name:"H100 (80 GB)",gb:80},{name:"B200 (192 GB)",gb:192},{name:"TPU v5p (95 GB)",gb:95}]);
+  const m=pick(MODELS),chip=pick([{name:"H100 (80 GB)",gb:80},{name:"B200 (180 GB)",gb:180},{name:"TPU v5p (95 GB)",gb:95}]);
   const chips=pick([8,16,64]);
   const bytes=16*m.P, per=bytes/chips, fits=per<=chip.gb*1e9*0.75;
   return {cat:"Training memory fit",
