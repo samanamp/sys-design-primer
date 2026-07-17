@@ -83,6 +83,10 @@ export default defineConfig({
 					autogenerate: { directory: 'optimization' },
 				},
 				{
+					label: 'Google Interview',
+					autogenerate: { directory: 'google-interview' },
+				},
+				{
 					label: 'Trace Reading',
 					autogenerate: { directory: 'trace-reading' },
 				},
