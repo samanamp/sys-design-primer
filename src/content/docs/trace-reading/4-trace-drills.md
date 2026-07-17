@@ -9,7 +9,9 @@ sidebar:
 
 **▶ [Open the trace trainer](/tools/trace-drills.html)** · **▶ [Open the mental-math trainer](/tools/perf-drills.html)**
 
-The trace trainer generates a randomized synthetic Nsight-style timeline — CPU/dataloader, CUDA API, GPU compute, and NCCL rows — with one of nine scenarios injected: unoverlapped all-reduce, input starvation, launch-bound inference, straggler rank, memory-bound dominant kernel, sync stalls, pipeline bubbles, allocator stalls, or a perfectly healthy trace (weighted double, so you can't assume something is always wrong).
+The trace trainer generates a randomized synthetic Nsight-style timeline — CPU/dataloader, CUDA API, GPU compute, and NCCL rows — with one of eleven scenarios injected: unoverlapped all-reduce, input starvation, launch-bound inference, straggler rank, memory-bound dominant kernel, sync stalls, pipeline bubbles, allocator stalls, a genuinely bandwidth-bound collective, recompilation gaps, or a perfectly healthy trace (weighted double, so you can't assume something is always wrong). Each scenario rotates through several framings — different hardware, different symptoms, sometimes a colleague's wrong theory baked into the prompt — so you learn the signature, not the story.
+
+Two of the eleven are deliberate **lookalikes**: the bandwidth-bound collective renders almost identically to a straggler (the discriminator is arithmetic — bytes ÷ bus bandwidth — plus per-rank symmetry), and recompilation gaps mimic input starvation (the discriminator is intermittency: starvation hits every step, recompiles only on shape changes). Getting these right means you're reading the timeline, not pattern-matching the vibe.
 
 ## The protocol
 

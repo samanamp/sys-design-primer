@@ -17,7 +17,7 @@ Everything here is GPU-framed: Nsight Systems, `torch.profiler`, Perfetto, CUDA 
 2. **[Guided Walkthroughs](/trace-reading/2-guided-walkthroughs/)** — six case studies narrated the way an interviewer runs them, wrong hypotheses included, with the confirming measurement and the arithmetic for each fix.
 3. **[Hands-On Labs](/trace-reading/3-hands-on-profiling/)** — capture your own traces: `torch.profiler` → Perfetto runs on a laptop CPU today; the `nsys`/`ncu` workflow is there for when you rent a GPU box. Companion notebook included.
 
-**[▶ The interactive trace trainer](/tools/trace-drills.html)** — randomized synthetic Nsight-style timelines with an injected pathology (or none — healthy traces are in the rotation, because recognizing a clean trace is part of the skill). Two-minute clock, diagnosis-first, full reveal with signature, confirming measurement, and fix.
+**[▶ The interactive trace trainer](/tools/trace-drills.html)** — randomized synthetic Nsight-style timelines with an injected pathology (or none — healthy traces are in the rotation, and two scenarios are deliberate lookalikes of others, because recognizing a clean trace and telling twins apart is part of the skill). Two-minute clock, diagnosis-first, full reveal with signature, confirming measurement, and fix.
 
 ## How to use it
 
