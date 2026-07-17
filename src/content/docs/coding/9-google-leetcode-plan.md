@@ -48,7 +48,7 @@ Google's guide asks for more than tagged problems measure. Be able to do each of
 - **Heaps:** implement sift-up/sift-down and heapify (703, day 10); know heapify is O(n) and why.
 - **Hashtables:** explain collision resolution (chaining vs open addressing), resize/amortization, and what makes a bad hash. Be ready to say when a hashtable is the WRONG choice (ordered iteration, range queries → tree).
 - **Tries:** implement insert/search/startsWith (208, day 7); know the space tradeoff vs hashing and when tries win (prefix queries, autocomplete — a Google favorite domain).
-- **Balanced BSTs (red-black / AVL / splay):** the bar is *explain, not code*: the invariant each maintains, why rotations restore it in O(1), why height stays O(log n), and the practical answer — "in production I'd use the language's sorted container, which is typically a red-black tree." Practice saying the AVL insert story out loud once.
+- **Balanced BSTs (red-black / AVL / splay):** the bar is *explain, not code*: the invariant each maintains, why rotations restore it in O(1), why height stays O(log n), and the practical answer — "in production I'd use the language's sorted container, which is typically a red-black tree." Learn and practice from the dedicated primer: [Balanced BSTs: AVL, Red-Black, Splay](/coding/16-balanced-bsts/).
 - **Trees generally:** binary, n-ary (589, day 12), and traversals both recursive AND iterative (interviewers ask for the iterative version to test stack fluency).
 - **Big-O:** for every problem in this plan, state time AND space before coding — including the recursion-stack space people forget.
 
