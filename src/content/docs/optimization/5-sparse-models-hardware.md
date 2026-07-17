@@ -148,7 +148,7 @@ The hardware caveat is the same in both cases: the theoretical math rate is not 
 
 ---
 
-## 6. Block Sparsity
+## 5. Block Sparsity
 
 Block sparsity removes whole dense blocks instead of individual values:
 
@@ -184,7 +184,7 @@ Block sparsity is a good interview example because it shows the tradeoff between
 
 ---
 
-## 7. Sparse Attention
+## 6. Sparse Attention
 
 Full attention over a sequence of length $n$ has a score matrix:
 
@@ -256,7 +256,7 @@ Staff-level point:
 
 ---
 
-## 8. Mixture of Experts: Sparse Parameters, Dense Experts
+## 7. Mixture of Experts: Sparse Parameters, Dense Experts
 
 Mixture of Experts is a different kind of sparsity: the model may have many parameters, but a router activates only a few experts per token, and each selected expert is usually a dense MLP. Routing math, capacity factors, load balancing, expert parallelism, and serving are covered in depth in [the MoE article](/optimization/6-mixture-of-experts/).
 
@@ -264,7 +264,7 @@ For this article's hardware lens, the point is that MoE's sparsity is expert-lev
 
 ---
 
-## 9. Dynamic Sparsity and Batching Pain
+## 8. Dynamic Sparsity and Batching Pain
 
 Dynamic sparsity depends on the input. Examples:
 
@@ -304,7 +304,7 @@ In high-throughput GPU serving, dynamic sparsity must be designed with the sched
 
 ---
 
-## 10. Memory Layout and Metadata
+## 9. Memory Layout and Metadata
 
 Sparse computation needs metadata. Metadata describes where the nonzeros are.
 
@@ -335,7 +335,7 @@ If the latter, the sparse model may be slower.
 
 ---
 
-## 11. Training Sparse Models
+## 10. Training Sparse Models
 
 Sparse inference and sparse training are different problems.
 
@@ -374,7 +374,7 @@ Training sparse from scratch can work, but it is a model-development project, no
 
 ---
 
-## 12. When Sparse Models Work
+## 11. When Sparse Models Work
 
 Sparse models are most credible when at least one of these is true:
 
@@ -407,7 +407,7 @@ If any piece is missing, the speedup is suspect.
 
 ---
 
-## 13. When Sparse Models Fail
+## 12. When Sparse Models Fail
 
 Sparse models fail in predictable ways.
 
@@ -441,7 +441,7 @@ Active parameters look cheap, but all-to-all dispatch and expert imbalance erase
 
 ---
 
-## 14. Benchmarking Sparse Models
+## 13. Benchmarking Sparse Models
 
 Sparse model claims need careful benchmarking.
 
@@ -488,7 +488,7 @@ So a 2x sparse kernel can become a 1.25x system speedup.
 
 ---
 
-## 15. Important Papers and Docs
+## 14. Important Papers and Docs
 
 Read these in roughly this order.
 
@@ -515,7 +515,7 @@ Read these in roughly this order.
 
 ---
 
-## 16. The Staff Engineer Summary
+## 15. The Staff Engineer Summary
 
 Sparse models are not one optimization. They are a contract between model structure and execution machinery.
 

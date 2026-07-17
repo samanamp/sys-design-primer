@@ -1,7 +1,9 @@
 ---
-title: LLM Quantization
-description: LLM Quantization
+title: "LLM Quantization"
+description: "A staff-level guide to LLM quantization: FP8/INT4/NVFP4 and MX formats, GPTQ/AWQ/SmoothQuant, KV-cache quantization, prefill-vs-decode regimes, kernels, and accuracy failure modes."
 ---
+
+# LLM Quantization
 
 ## 1. What a staff engineer actually needs to know
 

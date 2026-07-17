@@ -1,7 +1,9 @@
 ---
-title: Perf Debugging
-description: Perf Debugging
+title: "ML Performance Debugging"
+description: "A dense working reference for ML performance debugging: rooflines, GPU memory hierarchy, Nsight and warp-stall analysis, GEMM internals, collectives, parallelism, and MFU/HFU/MBU accounting."
 ---
+# ML Performance Debugging
+
 > A dense working reference. No throat-clearing, no pep talk. Memorize the numbers in the tables. Redraw the diagrams on a whiteboard until they are muscle memory. Every section ends with what a staff candidate should be able to produce live.
 
 ---
@@ -77,7 +79,7 @@ The ceiling of any perf work is set by silicon. You cannot optimize past the roo
 | H100 SXM   | 4N      | 80       | 3.35          | 67        | 989             | 1979     | —         | NVLink 4, 900 GB/s bidir per GPU       | Hopper, TMA, WGMMA, async-proxy          |
 | H200 SXM   | 4N      | 141      | 4.8           | 67        | 989             | 1979     | —         | NVLink 4, 900 GB/s                     | Same compute as H100, more HBM3e         |
 | B100       | 4NP     | 192      | ~8.0          | 60        | 1800            | 3500     | 7000      | NVLink 5, 1800 GB/s                    | Lower-TDP Blackwell variant              |
-| B200       | 4NP     | 192      | 8.0           | 80        | 2250            | 4500     | 9000      | NVLink 5, 1800 GB/s                    | Dual-die via NV-HBI; TMEM; CTA pairs     |
+| B200       | 4NP     | 180      | 7.7           | 80        | 2250            | 4500     | 9000      | NVLink 5, 1800 GB/s                    | Dual-die via NV-HBI; TMEM; CTA pairs     |
 | GB200 NVL72| 4NP     | 13,824   | —             | —         | 162,000         | 324,000  | 648,000   | 72 B200 in one NVLink domain, 130 TB/s | Rack-scale coherent interconnect         |
 | MI300X     | N5/N6   | 192      | 5.3           | 163       | 1307            | 2615     | —         | Infinity Fabric 896 GB/s (8-GPU ring)  | 8 XCDs, 304 CUs                          |
 | MI325X     | N5/N6   | 256      | ~6.0          | 163       | 1307            | 2615     | —         | Infinity Fabric                        | Capacity refresh of MI300X               |
@@ -126,7 +128,7 @@ The ceiling of any perf work is set by silicon. You cannot optimize past the roo
           L2 ~60 MB (shared across all SMs)
                      │
                      ▼
-          HBM3e 192 GB @ 8.0 TB/s
+          HBM3e 180 GB @ 7.7 TB/s
 ```
 
 The three things that matter versus Hopper:
@@ -138,7 +140,7 @@ The three things that matter versus Hopper:
 ### Things to memorize per chip
 
 - **H100**: 989 BF16 TF, 1979 FP8 TF, 3.35 TB/s HBM, 900 GB/s NVLink per GPU bidir. 80 GB.
-- **B200**: 2250 BF16 TF, 4500 FP8 TF, 9000 FP4 TF, 8.0 TB/s HBM, 1800 GB/s NVLink per GPU. 192 GB.
+- **B200**: 2250 BF16 TF, 4500 FP8 TF, 9000 FP4 TF, 7.7 TB/s HBM, 1800 GB/s NVLink per GPU. 180 GB.
 - **MI300X**: 1307 BF16 TF, 2615 FP8 TF, 5.3 TB/s HBM, 896 GB/s Infinity Fabric. 192 GB.
 - **TPU v5p**: 459 BF16 TF, 2.76 TB/s HBM, 4.8 Tb/s ICI. 95 GB.
 
@@ -176,7 +178,7 @@ The single most important internalization is the ratio between levels. Bandwidth
 │                                                                         │
 │    H100: 80 GB @ 3.35 TB/s                              ~450 ns         │
 │    H200: 141 GB @ 4.8 TB/s                                              │
-│    B200: 192 GB @ 8.0 TB/s                                              │
+│    B200: 180 GB @ 7.7 TB/s                                              │
 │                                                                         │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
@@ -233,9 +235,9 @@ The roofline's "ridge point" — the AI at which you transition from memory-boun
 |-------|--------|-------------|-----------|-------------------|
 | H100  | BF16   | 989         | 3.35      | **295**           |
 | H100  | FP8    | 1979        | 3.35      | **591**           |
-| B200  | BF16   | 2250        | 8.0       | **281**           |
-| B200  | FP8    | 4500        | 8.0       | **562**           |
-| B200  | FP4    | 9000        | 8.0       | **1125**          |
+| B200  | BF16   | 2250        | 7.7       | **292**           |
+| B200  | FP8    | 4500        | 7.7       | **584**           |
+| B200  | FP4    | 9000        | 7.7       | **1169**          |
 | MI300X| BF16   | 1307        | 5.3       | **247**           |
 | MI300X| FP8    | 2615        | 5.3       | **493**           |
 
@@ -2562,7 +2564,7 @@ The practical question: can you train at FP4 without losing quality? Current sta
 ### Where AMD wins
 
 - **HBM capacity**: MI300X at 192 GB, MI325X at 256 GB, MI350X at 288 GB. A 405B model in BF16 fits on 4× MI325X vs 8× H100. Decode memory pressure is materially lower.
-- **HBM bandwidth parity**: MI350X at 8 TB/s matches B200.
+- **HBM bandwidth parity**: MI350X at 8 TB/s slightly exceeds B200 (7.7).
 - **Infinity Fabric intra-node**: 896 GB/s on MI300X, competitive with NVLink 4.
 - **Unified memory with CPUs** (on MI300A variants): removes host-GPU copies entirely for some workloads.
 

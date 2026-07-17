@@ -242,7 +242,7 @@ $$
 \text{ridge} = \frac{\text{FLOPs/s}}{\text{HBM bytes/s}}
 $$
 
-Approximate bf16 ridge points: v5p $\approx 4.6\mathrm{e}14 / 2.8\mathrm{e}12 \approx 165$ FLOPs/byte; Trillium $\approx 9.2\mathrm{e}14 / 1.6\mathrm{e}12 \approx 575$ FLOPs/byte.
+Approximate bf16 ridge points: v5p $\approx 4.6\mathrm{e}14 / 2.76\mathrm{e}12 \approx 166$ FLOPs/byte; Trillium $\approx 9.2\mathrm{e}14 / 1.64\mathrm{e}12 \approx 560$ FLOPs/byte.
 
 For a weight-streaming matmul, arithmetic intensity is roughly the token batch dimension. So Trillium is memory-bound until per-chip batch is in the many-hundreds of tokens. That is enormous **batching pressure**: decode-style inference (small effective batch per weight read) leaves most of the MXU idle unless you batch aggressively, quantize (int8/fp8 doubles the effective ridge problem again), keep weights VMEM-resident, or restructure the workload. GPUs of the same era have lower FLOPs:bandwidth ratios and feel this less sharply. Ironwood pushes bandwidth (7.4 TB/s) precisely to pull the ridge back down for inference.
 
@@ -320,7 +320,7 @@ A: Match communication frequency to physical distance: tensor/sequence paralleli
 
 **Q: Why does Trillium create "batching pressure" for inference?**
 
-A: Its bf16 ridge point is roughly 575 FLOPs/byte (~9.2e14 FLOPs/s over ~1.6e12 B/s), versus ~165 on v5p. Weight-streaming matmul intensity scales with token batch, so you need several hundred tokens per weight read to leave the memory-bound region. Decode with small batches wastes most of the MXU; mitigations are aggressive continuous batching, int8/fp8 weights, VMEM-resident small layers, and speculative decoding to raise tokens per weight pass. Ironwood's 7.4 TB/s HBM is the hardware-side answer.
+A: Its bf16 ridge point is roughly 560 FLOPs/byte (~9.2e14 FLOPs/s over ~1.64e12 B/s), versus ~166 on v5p. Weight-streaming matmul intensity scales with token batch, so you need several hundred tokens per weight read to leave the memory-bound region. Decode with small batches wastes most of the MXU; mitigations are aggressive continuous batching, int8/fp8 weights, VMEM-resident small layers, and speculative decoding to raise tokens per weight pass. Ironwood's 7.4 TB/s HBM is the hardware-side answer.
 
 **Q: GSPMD vs shard_map — when do you use which?**
 
