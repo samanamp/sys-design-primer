@@ -12,7 +12,7 @@ Target: **Staff SWE, ML Performance (TPU / GPU), Google Core ML.** Loop per recr
 ## Round 1 — Coding
 
 - **[The 17-day interleaved plan](/google-interview/1-coding-plan/)** — built from LeetCode's Google tag (30-day + 3-month frequency), mixed across domains so every problem forces cold pattern recognition, with implement-from-scratch slots (mergesort, quicksort, trie, heap) matching Google's official prep guide.
-- **[Balanced BSTs primer](/google-interview/2-balanced-bsts/)** — the explain-not-code treatment of AVL/red-black/splay from the same guide.
+- **[Balanced BSTs primer](/algorithms/6-balanced-bsts/)** — the explain-not-code treatment of AVL/red-black/splay from the same guide.
 - Bar: clean working code in a real language, unprompted edge cases, complexity stated before coding, one test walked through line by line at the end. Do at least one mock in a Google Doc — that's the actual medium.
 
 ## Rounds 2–3 — System design (the offer rounds)

@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   'optimization':     'ML Performance & Optimization',
   'trace-reading':    'Trace Reading',
   'google-interview': 'Google Interview',
+  'algorithms':       'Algorithms',
   'diffusion':        'Diffusion',
   'primers':          'Distributed Systems Primers',
   'sysdesign':        'System Design',
@@ -24,6 +25,7 @@ const DESCRIPTIONS: Record<string, string> = {
   'optimization':     'The staff-level performance track: rooflines, serving, compression, parallelism, kernels, TPU/XLA, and daily mental-math drills.',
   'trace-reading':    'Reading GPU profiler timelines: the vocabulary, guided walkthroughs, hands-on labs, and an interactive trace trainer.',
   'google-interview': 'The loop battle plan: interleaved coding schedule, CS fundamentals, and per-round prep for Staff SWE ML Performance.',
+  'algorithms':       'Algorithm primers with traced diagrams: sorting, external sort, balanced BSTs — graph algorithms next.',
   'diffusion':        'Diffusion and world-model interview map: DDPM, solvers, tokenizers, DiT, flow matching, and AV architectures.',
   'primers':          'Partitioning, replication, consensus, storage engines, caching, stream processing, analytical systems, and RPC.',
   'sysdesign':        'Rate limiters, distributed counters, leader election, object stores, timeseries DBs, feature stores, and ML infra.',
@@ -36,7 +38,7 @@ const DESCRIPTIONS: Record<string, string> = {
 
 const SKIP = new Set(['reference']);
 const SIDEBAR_ORDER = [
-  'llm-primers', 'llm-sysdesign', 'google-interview', 'optimization', 'trace-reading', 'diffusion', 'primers', 'sysdesign',
+  'llm-primers', 'llm-sysdesign', 'google-interview', 'algorithms', 'optimization', 'trace-reading', 'diffusion', 'primers', 'sysdesign',
   'misc', 'ml-coding', 'coding', '40-min-interview', 'prachub-designs',
 ];
 

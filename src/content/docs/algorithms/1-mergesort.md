@@ -84,7 +84,7 @@ On a **linked list**, the tax vanishes: merging is just pointer re-splicing — 
 ## Where it runs in production
 
 - **Timsort** (Python `sorted`, Java `Arrays.sort` for objects) is bottom-up mergesort that first detects already-sorted runs in the input, then merges them galloping-style — O(n) on nearly-sorted data, stable, n log n worst case.
-- **External sort:** when data exceeds RAM, you sort chunks in memory and k-way merge sorted runs from disk — mergesort's merge is the only step that works on streams you can't hold in memory. Full treatment in [External Sort & K-Way Merge](/coding/20-external-sort-kway-merge/).
+- **External sort:** when data exceeds RAM, you sort chunks in memory and k-way merge sorted runs from disk — mergesort's merge is the only step that works on streams you can't hold in memory. Full treatment in [External Sort & K-Way Merge](/algorithms/5-external-sort-kway-merge/).
 
 ## Implementation
 
@@ -133,7 +133,7 @@ def merge(left: list[int], right: list[int]) -> list[int]:
 On tied keys, merge takes from the left half first (`<=`). Left-half elements preceded right-half elements in the original array, so equal keys never reorder — at any level of the recursion. Flip that to `<` and stability is gone; that one character is the whole property.
 
 **Q: Sort a 10 GB file with 1 GB of RAM?**
-External mergesort. Pass 1: read ~1 GB chunks, sort each in memory, write ~10 sorted runs to disk. Pass 2: k-way merge the 10 runs with a min-heap over their front elements, streaming output — only one buffered block per run in memory at a time. Merge is the only sort step that works on streams, which is why this is always mergesort. Details: [External Sort & K-Way Merge](/coding/20-external-sort-kway-merge/).
+External mergesort. Pass 1: read ~1 GB chunks, sort each in memory, write ~10 sorted runs to disk. Pass 2: k-way merge the 10 runs with a min-heap over their front elements, streaming output — only one buffered block per run in memory at a time. Merge is the only sort step that works on streams, which is why this is always mergesort. Details: [External Sort & K-Way Merge](/algorithms/5-external-sort-kway-merge/).
 
 **Q: Why does Python use a mergesort derivative (Timsort) instead of quicksort?**
 Python sorts arbitrary objects where stability is a documented guarantee (multi-key sorts must compose), and real-world data is often partially sorted — Timsort exploits existing runs to hit O(n) on nearly-sorted input while keeping the n log n worst-case guarantee. Quicksort offers none of the three.
