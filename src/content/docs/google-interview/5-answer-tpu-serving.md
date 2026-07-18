@@ -99,9 +99,10 @@ Slice compute:      8 × 4,614 TF FP8 = 36.9 PF peak × 40% MFU target
                      20–30% is common for MoE prefill; at 30% every fleet
                      number below grows ~1.3×)
 
-s = 8K:    FFN 8,192 × 80 G = 0.66 PF → 44 ms;  attn 0.07 PF → ~5 ms (noise)
-s = 32K:   FFN ~2.6 PF → ~175 ms;               attn ~1.1 PF → ~75 ms (visible)
-s = 128K:  FFN 10.5 PF → ~710 ms;               attn ~18 PF → ~1.2 s (DOMINANT)
+time = work / rate: PFLOP of work ÷ 14.8 PFLOP/s effective
+s = 8K:    FFN 8,192 × 80 G = 0.66 PFLOP ÷ 14.8 PFLOP/s → 44 ms;  attn 0.07 PFLOP → ~5 ms (noise)
+s = 32K:   FFN ~2.6 PFLOP → ~175 ms;                              attn ~1.1 PFLOP → ~75 ms (visible)
+s = 128K:  FFN 10.5 PFLOP → ~710 ms;                              attn ~18 PFLOP → ~1.2 s (DOMINANT)
 Crossover: attn = FFN at s ≈ 80 G / (2·L·d) ≈ 76K tokens
 ```
 
