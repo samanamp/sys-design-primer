@@ -50,7 +50,7 @@ A Llama-class dense 70B encodes a set of GPU assumptions. Name them, then invert
 | Dynamic shapes are cheap (CUDA graphs optional) | XLA compiles per shape signature; dynamic shapes → recompilation storms → pad/bucket everything |
 | NVSwitch all-to-all inside the node; dense TP is the default | ICI torus: cheap ring collectives per axis, all-to-all is the expensive one but scales to thousands of chips per slice — this *rewards* expert parallelism laid out on torus axes |
 | SMEM is tiny; caches hide you | VMEM is a ~64–128 MiB software-managed scratchpad at ~20× HBM bandwidth; what fits in VMEM changes regime |
-| Ridge point ~300 FLOPs/byte (H100 bf16) | Trillium bf16 ridge ≈ 918e12 / 1.64e12 ≈ **560 FLOPs/byte**; Ironwood bf16 ≈ 2,307/7.37 ≈ **313**, FP8 ≈ 4,614/7.37 ≈ **626**. High ridge = brutal batching pressure on decode |
+| Ridge point ~300 FLOPs/byte (H100 bf16) | Trillium bf16 ridge ≈ 918e12 / 1.64e12 ≈ **560 FLOPs/byte**; Ironwood bf16 ≈ 2,307/7.37 ≈ **313** (2,307 TF assumes bf16 ≈ FP8/2 — Google publishes only the 4,614 TF FP8 figure), FP8 ≈ 4,614/7.37 ≈ **626**. High ridge = brutal batching pressure on decode |
 | Dense means every token pays full FLOPs — fine when FLOPs are the scarce resource | On TPU pods, FLOPs are abundant and *bandwidth per active byte* is the scarce resource for decode; sparsity buys quality per byte moved |
 
 The one-sentence thesis I'd state to the interviewer:
@@ -66,7 +66,8 @@ COST OF ONE DECODED TOKEN — dense 70B, int8, GQA-8, 8K context, batch B
 ========================================================================
 
   Weight streaming:   70 GB / B per token        <- attacked by MoE (§3.1)
-  KV cache read:      ~244 KB × context, per seq <- attacked by MLA + int8 KV (§3.2)
+  KV cache read:      ~320 KB × context, per seq <- attacked by MLA + int8 KV (§3.2)
+                      (80 layers × 8 KV heads × 128 × 2 (K,V) × 2 B)
   Padding waste:      0–40% of FLOPs             <- attacked by shape alignment (§3.3)
   Precision:          2 B/param if bf16          <- attacked by AQT int8 / FP8 (§3.4)
   Passes per token:   1.0                        <- attacked by MTP speculation (§3.5)
@@ -102,10 +103,24 @@ Committing to concrete numbers up front — every one defensible against §2's c
 
 ### 3.1 MoE instead of dense
 
-**The economics.** Scaling-law results since GLaM: an MoE with N_active ≈ 35B and 8–10× total/active ratio matches a dense model of roughly 1.5–2× its active count at equal training tokens. So ~35B active can gate against dense 70B quality — this is not speculative; it is the published Gemini lineage and DeepSeek-V3's demonstrated result. The serving win, per decoded token at batch B with E-of-N routing (top-k=8 of 256 fine-grained experts, DeepSeek-style, plus 1 shared expert):
+**The economics.** Scaling-law results since GLaM: an MoE with N_active ≈ 35B and 8–10× total/active ratio matches a dense model of roughly 1.5–2× its active count at equal training tokens. So ~35B active can gate against dense 70B quality — a claim strongly suggested by every frontier lab's revealed preference (Gemini 1.5/2.5, DeepSeek-V3, GLaM all shipped sparse), but never published as a controlled iso-token MoE-vs-dense comparison; that's why the proxy ladder in §5 gates on it, and the "what if it's only 1.3×" follow-up in §6 prices the downside.
 
-- Dense 70B, int8: **70 GB** of weights streamed per forward pass regardless of batch.
-- MoE 350B total / 35B active, int8: bytes streamed per pass = shared layers + *union of experts touched by the batch*. At small B that union is small (~35–60 GB); at large B it saturates toward all resident experts — but by then you're compute-bound and the MXU is earning its keep. The honest statement: MoE moves the memory-bound region's cost from "total params" to "active params + routing spread," a 1.5–2× decode-bandwidth win at realistic serving batches, *and* a ~2× quality win at iso-active-FLOPs. Multiplied, that's the quality-per-dollar gap.
+The serving-bytes story, done honestly. With top-8-of-256 routing per layer, the *union* of experts a batch touches grows fast: expected fraction touched ≈ 1 − (1 − 8/256)^B. Per pass, with ~50 GB of always-touched weights (attention, shared expert, embeddings) and ~300 GB of routed experts, all int8:
+
+```text
+BYTES PER DECODE PASS vs BATCH  (per layer routing is independent → same fraction each layer)
+  B     expert-union   bytes/pass      bytes/token (MoE)   bytes/token (dense 70B)
+  8        22%           ~117 GB           ~15 GB               8.75 GB
+  32       64%           ~240 GB           ~7.5 GB              2.2  GB
+  128      98%           ~345 GB           ~2.7 GB              0.55 GB
+                         (saturates at all ~350 GB by B ≈ 100)
+```
+
+So the "MoE streams only active params" story is true only at B ≲ 8. At any realistic serving batch the MoE streams *more* weight bytes per token than the dense 70B, because the whole 350 GB is touched every pass. The honest statement of the MoE win, and it's still decisive:
+
+1. **Iso-quality at half the active FLOPs.** Every compute-bound regime — prefill, large-batch decode, and the entire training run — pays per *active* param. That's a ~2× FLOPs-per-token win at the quality gate, and it's the win that survives at exactly the large batches where the bytes story dies.
+2. **It shifts the binding HBM constraint from weights to KV**, which MLA then attacks (§3.2): weight traffic amortizes over B either way; what limits B is KV residency, and that's where the design spends its effort.
+3. **At genuinely small B** (latency-critical single-stream), the routing union is small and the active-param streaming win reappears — the regime crossover is at roughly B ≈ 8–32, and §4's cost table states which side of it each column sits on.
 
 **Why MoE is TPU-native rather than a TPU liability:**
 
@@ -136,24 +151,20 @@ Decode attention reads the entire KV cache per token; its arithmetic intensity i
 Per token per layer, d_model = 7,168-class model:
 
 - **GQA, 8 KV heads × head_dim 128, bf16:** 8 × 128 × 2 (K,V) × 2 B = **4 KB**.
-- **MLA (arXiv 2405.04434, 2412.19437): compressed latent 512 + decoupled RoPE key 64, bf16:** (512 + 64) × 2 B ≈ **1.15 KB** — DeepSeek reports the equivalent of reducing KV to roughly 1/12 of their MHA baseline, and vs this GQA config it's ~3.5×.
+- **MLA (arXiv 2405.04434, 2412.19437): compressed latent 512 + decoupled RoPE key 64, bf16:** (512 + 64) × 2 B ≈ **1.15 KB** — DeepSeek-V2 reports a 93.3% KV cache reduction vs their MHA baseline (~1/15), and vs this GQA config it's ~3.5×.
 
 Full-model KV budget, the number that sets serving batch:
 
 ```text
 KV BYTES PER TOKEN, 60 LAYERS
                               bf16        int8 KV
-  MHA-56 (what MLA's 12x       ~1.7 MB     —        (nobody ships this)
+  MHA-56 (what MLA's ~15x      ~1.7 MB     —        (nobody ships this)
     claim is measured against)
-  GQA-8 (Llama-style)           244 KB      122 KB
-  MLA (512 + 64 latent)          70 KB       35 KB   <- 7x vs bf16 GQA
-
-  Trillium chip, ~12 GB HBM left after sharded weights:
-    GQA bf16:   ~49K resident tokens  (~6 seqs @ 8K)
-    MLA int8:  ~340K resident tokens (~42 seqs @ 8K)
+  GQA-8 (Llama-style)           240 KB      120 KB
+  MLA (512 + 64 latent)          70 KB       35 KB   <- ~7x vs bf16 GQA
 ```
 
-Why that matters concretely on **Trillium's 32 GB**: a 61-layer model at 4 KB/token/layer stores ~244 KB/token → after ~20 GB of int8 weights per chip (sharded), ~12 GB of HBM holds only ~49K tokens of KV — a handful of 8K-context sequences per chip, i.e., batch too small to climb the ridge. MLA at ~70 KB/token holds ~170K tokens: 3.5× more concurrent sequences, which is 3.5× more decode batch, which is the difference between 15% and 45% of the memory-bound tokens/s ceiling being spent on *useful* batch. Add int8 KV (§3.4) and double it again.
+Why that matters concretely on **Trillium's 32 GB**: 350 GB of int8 weights forces a **16-chip replica** (~22 GB of weights per chip after sharding — §4 uses this replica), leaving ~10 GB of HBM per chip, ~160 GB per replica, for KV. At GQA-8 bf16 (240 KB/token, 60 layers), 10 GB holds ~41K tokens per chip — about five 8K-context sequences per chip, batch too small to climb the ridge. MLA at ~70 KB/token holds ~143K tokens (~17 seqs @ 8K per chip): 3.5× more concurrent sequences, i.e., 3.5× more decode batch — the difference between a small and a large fraction of the memory-bound tokens/s ceiling being spent on *useful* batch (the specific 15%-vs-45% split I'd quote is a prior; §5's serving prototype replaces it with a measurement). Add int8 KV (§3.4) and double it again, to ~35 seqs @ 8K per chip.
 
 **The tradeoff, stated honestly:** MLA is more complex — the absorbed-matmul decode trick, decoupled RoPE, and it needs a real kernel. On the TPU serving stack that kernel exists (Ragged Paged Attention v3 in the `tpu-inference` vLLM backend, which as of late 2025 is the supported path; JetStream was archived Feb 2026), but it is younger and less battle-tested than GQA paths. My call: MLA on the primary design because KV bytes dominate long-context decode economics; **GQA-8 as the de-risked fallback** if MLA kernel maturity or training instability shows up in the first scaling run. This is a reversible decision if made before the main run; irreversible after.
 
@@ -172,7 +183,7 @@ A GPU-designed model gets quantized after the fact (GPTQ/AWQ) and eats an unbudg
 
 - **AQT int8 (github.com/google/aqt) for train→serve:** quantized matmuls *inside* training, so the served int8 model is bit-exact with what training optimized. Cost: ~1.2–1.4× step time during training. Benefit: no post-training calibration lottery, and the quality gate is evaluated on the exact serving numerics.
 - **FP8 where it's native:** Ironwood is the first TPU with native FP8 (4,614 TF; E4M3 weights/activations, E5M2 where gradient-like ranges appear). Pre-Ironwood emulates FP8 without the throughput win, so the precision plan is chip-conditional: int8 AQT as the floor everywhere, FP8 activations on Ironwood to double the effective ridge-climbing rate on prefill.
-- **int8 KV cache:** halves §3.2's KV bytes again → MLA + int8 KV ≈ 35 KB/token vs 244 KB bf16-GQA — call it **7×** more tokens resident, compounding directly into decode batch.
+- **int8 KV cache:** halves §3.2's KV bytes again → MLA + int8 KV ≈ 35 KB/token vs 240 KB bf16-GQA — call it **7×** more tokens resident, compounding directly into decode batch.
 
 The precision plan as a table, because "quantize it" is not a plan:
 
@@ -195,7 +206,7 @@ State which chip and let it drive the context architecture. The specs that matte
 
 | | Trillium (v6e) | Ironwood (TPU7x) | v5p (for contrast) |
 | --- | --- | --- | --- |
-| BF16 / FP8 compute | ~918 TF / emulated | 2,307 TF / 4,614 TF native | 459 TF / — |
+| BF16 / FP8 compute | ~918 TF / emulated | ~2,307 TF (assumed bf16 ≈ FP8/2; unpublished) / 4,614 TF native | 459 TF / — |
 | HBM | 32 GB @ 1.64 TB/s | 192 GB @ 7.37 TB/s | 95 GB @ 2.76 TB/s |
 | ICI | 2D torus, 256-chip pods | 1.2 TB/s bidir, pods 256 / 9,216 | 3D torus, 8,960 chips |
 | Cores | 256×256 MXU, 2 SparseCores | 2 TensorCores + 4 SparseCores | 128×128 MXU |
@@ -211,25 +222,38 @@ My primary target is Ironwood for the flagship SKU and Trillium for a distilled 
 
 ## 4. The Cost Model — Show the Method
 
-Numbers are constructed but the method is the deliverable. Assumptions on the table: int8 weights, decode-dominant workload, memory-bound decode (true at these ridge points until batch is very large), 40% MBU achieved on the weight-streaming ceiling (achievable; >50% is good), speculation 1.8×. Hourly prices are assumptions, not quotes: H100 ≈ $2.50/chip-hr effective, Trillium ≈ $1.40, Ironwood ≈ $3.50 — sensitivity in the last row.
+Numbers are constructed but the method is the deliverable. The method is a two-ceiling min, and every column must state which ceiling binds:
 
-**Decode ceiling method:** tokens/s per replica ≈ (aggregate HBM BW × MBU / bytes streamed per token) × speculation factor × batch (sequences served concurrently, bounded by KV residency).
+```text
+tokens/s per replica = min( memory-bound:  B × (aggregate HBM BW × MBU) / bytes(B),
+                            compute-bound: MFU × aggregate FLOP/s / (2 × P_active) )
 
-| | Dense 70B on 4×H100 | MoE 350B/35B on 8×Trillium | MoE on 4×Ironwood |
+bytes(B) = weights touched per pass (§3.1 bytes(B) table) + B × context × KV bytes/token
+Speculation (×1.8) applies only in the memory-bound regime: it converts one
+weight-streaming pass into ~1.8 verified tokens, but it does not create FLOPs.
+```
+
+Assumptions on the table: int8 weights, 8K-context decode, MBU 40% (achievable; >50% is good), MFU 40%, speculation 1.8×. Weights must be resident: 350 GB of int8 MoE weights means the Trillium replica is **16 chips** (512 GB HBM — the distilled Trillium SKU from §3.6 is the other way to serve Trillium, priced separately below). Hourly prices are assumptions, not quotes: H100 ≈ $2.50/chip-hr effective, Trillium ≈ $1.40, Ironwood ≈ $3.50 — sensitivity below.
+
+| | Dense 70B, 4×H100, B=64 | MoE 350B/35B, 16×Trillium, B=256 | MoE 350B/35B, 4×Ironwood, B=512 |
 | --- | --- | --- | --- |
-| Weights streamed/token (int8) | 70 GB | ~45 GB (active + routing spread) | ~45 GB |
-| Aggregate HBM BW | 4×3.35 = 13.4 TB/s | 8×1.6 = 12.8 TB/s | 4×7.37 = 29.5 TB/s |
-| Weight-pass ceiling (40% MBU) | 76 passes/s | 114 passes/s | 262 passes/s |
-| × speculation 1.8× | ~137 | ~205 | ~470 |
-| KV-limited concurrent 8K seqs | ~40 (GQA bf16, 60 GB free) | ~90 (MLA int8, ~90 GB free) | ~400+ (700+ GB free) |
-| Replica $/hr (assumed) | $10.00 | $11.20 | $14.00 |
-| **Relative $/1M decode tokens at iso-quality** | **1.0×** | **~0.55×** | **~0.3–0.35×** |
+| HBM: weights + KV + free | 320 GB: 70 + 168 + ~80 | 512 GB: 350 + 73 + ~89 | 768 GB: 350 + 147 + ~270 |
+| KV bytes/pass (B × 8K × KV/token) | 64×8K×320 KB = 168 GB (GQA bf16) | 256×8K×35 KB = 73 GB (MLA int8) | 512×8K×35 KB = 147 GB |
+| Weight bytes/pass | 70 GB | ~350 GB (all experts touched at B=256, per §3.1) | ~350 GB |
+| bytes(B) total | 238 GB | 423 GB | 497 GB |
+| Aggregate BW × 40% MBU | 13.4 → 5.36 TB/s | 26.2 → 10.5 TB/s | 29.5 → 11.8 TB/s |
+| Memory-bound: B × BW/bytes × 1.8 | 64 × 22.5 × 1.8 ≈ **2,600 tok/s** | 256 × 24.8 × 1.8 ≈ **11,400 tok/s** | 512 × 23.7 × 1.8 ≈ **21,900 tok/s** |
+| Compute ceiling: 0.4 × FLOPs/2P_act | 0.4×8 PF int8 / 140 GF ≈ 22,900 | 0.4×29.4 PF int8 / 70 GF ≈ 168,000 | 0.4×18.5 PF FP8 / 70 GF ≈ 105,000 |
+| **Binding regime** | memory-bound | memory-bound | memory-bound |
+| Replica $/hr (assumed) | $10.00 | $22.40 | $14.00 |
+| $/1M decode tokens | $10 / 9.3M tok/hr ≈ **$1.07** | $22.40 / 41M ≈ **$0.55** | $14 / 79M ≈ **$0.18** |
+| **Relative $ at iso-quality** | **1.0×** | **~0.5×** | **~0.17× paper, call it ~0.2–0.3× after sliders** |
 
-Read the direction, not the third digit: the MoE wins ~1.5× on bytes-per-token, ~1.5–2× on KV-enabled batch, and Ironwood adds a raw bandwidth-per-dollar term. Even if any single factor underdelivers by 30%, the compounded margin holds. Prefill flips to compute-bound and favors TPU harder still (Ironwood FP8: 4×4,614 = 18.5 PF FP8 per 4-chip replica vs ~8 PF dense-FP8 on 4×H100).
+Why the batches differ — that *is* the design working: batch is KV-residency-limited, and MLA+int8 KV is what buys it. Dense GQA bf16 at 320 KB/token caps the H100 replica near B≈95 at 8K (B=64 leaves activation headroom); MLA int8 at 35 KB/token supports B≈580 on the Trillium replica and B≈1,490 on Ironwood — the table runs both well below their caps. Note what the table does *not* claim: at these batches the MoE streams **more** weight bytes per pass than the dense model (350 vs 70 GB — §3.1's union arithmetic), and all three columns sit in the memory-bound regime, well under their compute ceilings. The win is composed of KV-enabled batch (~4–8×), bandwidth-per-dollar (Trillium 26.2 TB/s for $22.40 vs H100 13.4 for $10), and the iso-quality gate at half the active FLOPs — not "fewer bytes streamed." Prefill flips to compute-bound and favors the MoE harder still: 18.5 PF FP8 per 4-chip Ironwood replica vs ~8 PF dense-FP8 on 4×H100, at half the FLOPs per token. And the distilled Trillium SKU (§3.6) is the second Trillium answer: a model sized to fit a 4-chip replica outright, for the traffic slice that doesn't need the flagship.
 
-**Sensitivity, named explicitly:** the model is most fragile to (1) the assumed Ironwood price — if it's 2× my assumption, the Ironwood column degrades to ~0.6–0.7× and Trillium becomes the value play; (2) achieved MBU — if the MoE serving stack lands at 25% MBU while the mature GPU stack holds 45%, half the paper margin evaporates, which is why MBU is the top validation metric in §5; (3) routing spread — adversarially uniform token routing at small batch pushes bytes-touched toward total params. I'd present the table with these three sliders, not as a point estimate.
+**Sensitivity, named explicitly:** the model is most fragile to (1) the assumed Ironwood price — at 2× my assumption the Ironwood column degrades to ~0.35×, and at 2× plus a 25% MBU stack it converges toward Trillium; (2) achieved MBU — if the young MoE serving stack lands at 25% while the mature GPU stack holds 45%, the Trillium column moves from ~0.5× to ~0.85× and the margin thins to the quality-gate term, which is why MBU is the top validation metric in §5; (3) context mix — at 32K+ contexts KV bytes/pass dominate and the MLA term grows, at 2K they shrink. I'd present the table with these three sliders, not as a point estimate.
 
-**Training amortization (the "but MoE costs more to train" objection, retired with arithmetic):** suppose the MoE program costs 2× the dense-70B training compute — say ~8e24 vs ~4e24 FLOPs including the AQT tax and proxy sweeps, order-of $50M extra at cloud-ish rates. A successful product serving 100B tokens/day at even $1/1M tokens is ~$36M/year of serving cost per 0.1× of the cost ratio; the ~0.5× serving advantage repays the training delta in months and then compounds for the model's lifetime. If the workload is *not* serving-dominant, this whole design brief changes — which is exactly why §1 pinned that assumption first.
+**Training amortization (the "but MoE costs more to train" objection, retired with arithmetic):** suppose the MoE program costs 2× the dense-70B training compute — ~8e24 vs ~4e24 FLOPs including the AQT tax and proxy sweeps. Price the delta with the same rates as the table: 4e24 FLOPs at 40% MFU on $2.50/hr H100s (989 TF bf16 → ~400 TF sustained) is 4e24/4e14 ≈ 1e10 chip-seconds ≈ 2.8M chip-hours ≈ **$7M** (double it for overheads and it's still ~$15M, not $50M). On the serving side: 100B tokens/day is 36.5T tokens/year — at a $1/1M-token baseline that's ~$36.5M/year *total*, i.e., ~$3.65M/year per 0.1× of cost ratio. The ~0.5× advantage saves ~$18M/year, repaying the ~$7M delta in **~5 months** at that volume. Repayment time scales inversely with volume: at Google scale (order 1T+ tokens/day) it's weeks; at a boutique 1B tokens/day it's ~$180K/year of savings and the payback is measured in decades — at which point Path B in §6 is the answer, not this training run. If the workload is *not* serving-dominant, this whole design brief changes — which is exactly why §1 pinned that assumption first.
 
 ---
 
@@ -291,7 +315,7 @@ Named exclusions are half the design. Things this program deliberately does not 
 
 This deserves more than a dismissal, because there are really three paths and a staff answer prices all of them:
 
-*Path A — port and serve (the control arm).* Decode on a dense 70B at int8 is weight-streaming-bound, so the GPU-vs-TPU cost ratio is bandwidth-per-dollar times overhead: H100 gives 3.35 TB/s ÷ $2.50/hr = 1.34 TB/s per $·hr vs Trillium's 1.64 ÷ $1.40 = 1.17 (**×1.14**); 70 GB of weights doesn't fit in 32 GB HBM so you tensor-shard across ≥4 chips, paying a per-layer ICI all-reduce (~10–15% MBU haircut, **×1.1** — partially offset by the 4-chip slice's 128 GB giving more KV/batch headroom than one 80 GB H100); donor shapes and hyper-tuned GPU kernels for exactly-Llama cost another ~5–10% (**×1.07**). Compound ≈ **1.3–1.4× of GPU cost**, load-bearing on the price assumption (§4's sliders move it 1.1–1.6×). Zero training spend, but every architectural lever stays where the donor left it. This is the baseline every other path must beat.
+*Path A — port and serve (the control arm).* Decode on a dense 70B at int8 is weight-streaming-bound, so the GPU-vs-TPU cost ratio is bandwidth-per-dollar times overhead: H100 gives 3.35 TB/s ÷ $2.50/hr = 1.34 TB/s per $·hr vs Trillium's 1.64 ÷ $1.40 = 1.17 (**×1.14**); 70 GB of weights doesn't fit in 32 GB HBM so you tensor-shard across ≥4 chips, paying a per-layer ICI all-reduce (~10–15% MBU haircut — a prior, to be replaced by §5's serving-prototype measurement, **×1.1** — partially offset by the 4-chip slice's 128 GB giving more KV/batch headroom than one 80 GB H100); donor shapes and hyper-tuned GPU kernels for exactly-Llama cost another ~5–10% (also a prior pending the same prototype, **×1.07**). Compound ≈ **1.3–1.4× of GPU cost**, load-bearing on the price assumption (§4's sliders move it 1.1–1.6×). Zero training spend, but every architectural lever stays where the donor left it. This is the baseline every other path must beat.
 
 *Path B — adapt the checkpoint (the path that's gotten real since 2025).* The claim "you can't change the architecture without retraining" is no longer true, and pretending otherwise loses credibility:
 - **Sparse upcycling** (Komatsuzaki et al., arXiv 2212.05055): initialize MoE experts from copies of the dense FFN — the 70B's weights seed a ~8×70B-FFN MoE that recovers quality with a small fraction of from-scratch tokens. This directly reuses the initial weights.
@@ -305,7 +329,10 @@ So Path B recovers roughly three of my four levers at maybe 5–10% of the flags
 
 *On distillation specifically* — the objection "the models aren't in the same family" is half right. **Logit-level** KD across families is genuinely awkward (vocabulary/tokenizer mismatch means the teacher's distribution doesn't align token-for-token; ULD-style tricks exist but are lossy). **Sequence-level** distillation — generating data with the teacher and fine-tuning the student on it — has no family requirement at all, and it's how cross-family distillation actually ships. The two-SKU design in §3.6 is same-family (flagship→Trillium SKU), where logit KD works cleanly; that's deliberate.
 
-*The decision rule*, which is the actual staff signal: scratch-vs-adapt is a tokens-served amortization question. If the training delta is ~$40M and the from-scratch design saves an additional ~0.2×–0.3× on serving cost versus the best adapted model, the crossover sits at roughly 10¹⁴–10¹⁵ served tokens — months of Google-scale traffic, decades of a small deployment. **At Google volume, scratch wins and Path B is the de-risking stage** (upcycle + convert first, learn the serving numbers on real chips, then commit the flagship run). At startup volume, Path B *is* the answer and claiming otherwise is resume-driven engineering. Saying which side of the crossover you're on — and why — is the answer; picking a path without the crossover is the miss.
+*The decision rule*, which is the actual staff signal: scratch-vs-adapt is a tokens-served amortization question. Using §4's own rates, the from-scratch training delta is order ~$7–15M; if the from-scratch design saves an additional ~0.2×–0.3× on serving cost versus the best adapted model — ~$0.20–0.30 per 1M tokens at the $1/1M baseline — the crossover sits at roughly 3–7×10¹³ served tokens: weeks-to-months of Google-scale traffic, decades of a small deployment. **At Google volume, scratch wins and Path B is the de-risking stage** (upcycle + convert first, learn the serving numbers on real chips, then commit the flagship run). At startup volume, Path B *is* the answer and claiming otherwise is resume-driven engineering. Saying which side of the crossover you're on — and why — is the answer; picking a path without the crossover is the miss.
+
+**"Ironwood matches B200 spec-for-spec. Doesn't that collapse your whole 'TPU-friendly design' thesis?"**
+Partially — and conceding the true part first is the answer. On an Ironwood-only fleet, the decode roofline argument converges with the GPU's (bf16 ridge ~313 vs H100's ~295), and the honest proof is that DeepSeek-V3 — a GPU-designed model — already uses MoE + MLA + MTP + FP8: the six levers are frontier economics, not TPU physics. What survives spec parity is the *constraint surface*, and it has four TPU-specific components: (1) shape/compile discipline — 256×256 MXU tiles and XLA static shapes are stricter than the GPU toolchain, so GPU-native head dims and dynamic shapes still burn FLOPs and recompiles at parity; (2) the fabric — EP layout, disaggregation topology, and KV movement designed for a 9,216-chip ICI/OCS domain rather than 72-GPU NVLink islands, which is where co-design lives at pod scale; (3) fleet heterogeneity — nobody serves on Ironwood alone; the Trillium tier (32 GB, ridge ~560) still binds the fleet-wide design, which is what the two-SKU strategy answers; (4) the dtype roadmap cuts against us — B200's FP4 (9,000 TF) is a discount a TPU model can't take, and a serious cost model prices that threat instead of ignoring it. So the pitch shifts: on Ironwood, "TPU-friendly" means the same frontier levers plus stricter shape discipline plus a pod-scale serving topology GPUs can't express, minus FP4 — not salvation from a hostile roofline. Note also "Ironwood is cheaper" is a presumption (TCO/perf-per-watt), not a published price — say so.
 
 **"What breaks at 9,216 chips?"**
 That's the Ironwood full pod — a training-scale question. Failure modes in order: (1) anything crossing the ICI/DCN boundary by accident — EP or TP spanning slices meets ~100×-lower bandwidth; parallelism layout must be torus-aware by construction. (2) All-to-all bisection: EP dispatch is the collective most sensitive to it; keep EP groups within OCS-optimized sub-tori and hierarchical (in-slice dispatch, cross-slice only for data parallelism). (3) MTBF: at ~9K chips, preemptions and chip failures are continuous — OCS routing around failed cubes plus checkpoint/resume cadence become first-class design inputs. (4) Load imbalance amplification: a 2% expert hot-spot is invisible at 64 chips and a synchronous-step straggler at 9K.
@@ -323,7 +350,7 @@ Then long-context machinery is over-designed and the distilled Trillium SKU carr
 A proxy-scale ladder: ~1B and ~10B-active versions of the exact architecture (same sparsity ratio, same MLA config, same AQT numerics) trained on the same data mix, fitted against the dense scaling curve at matched tokens. The decision rule is pre-registered: the MoE ladder must sit above the dense ladder's quality-per-active-FLOP by the margin the cost model needs, MLA must match GQA within noise on the proxy evals, and AQT-int8 must track bf16 within its budget. Any architecture bet that can't be tested at 1/50 scale doesn't go in the flagship. The proxy runs also produce the serving prototype — MBU and acceptance-rate measurements come from real chips, not the spreadsheet, before the big run locks the shapes.
 
 **"You claimed a 2× quality-per-active-param win for MoE. What if it's 1.3×?"**
-Then rerun §4 with active params scaled up to hit the quality gate — say 50B active instead of 35B. Bytes streamed rises ~1.4×, the relative cost lands around 0.7–0.8× instead of 0.55× on Trillium, and the program is still positive but no longer decisive; at that point the Ironwood bandwidth-per-dollar term and MLA's KV win carry the case. This is the answer's load-bearing property: no single factor carries the whole margin, and I can tell you the break-even point of each one.
+Then rerun §4 with active params scaled up to hit the quality gate — say 50B active instead of 35B, which at the same 10× sparsity ratio means ~500B total. The decode hit is through residency, not the active count: 500 GB of int8 weights grows the Trillium replica to ~20 chips and adds ~150 GB to every pass's weight streaming; redoing §4's arithmetic lands the Trillium column around ~0.7× instead of ~0.5× and Ironwood around ~0.22× paper instead of ~0.17×. Prefill and training costs rise the full 1.4× with active FLOPs. The program is still positive but no longer decisive on Trillium; at that point the Ironwood bandwidth-per-dollar term and MLA's KV win carry the case. This is the answer's load-bearing property: no single factor carries the whole margin, and I can tell you the break-even point of each one.
 
 **"The serving stack: what do you actually run?"**
 `tpu-inference` — the unified JAX/vLLM TPU backend (Oct 2025), which is the currently supported path; JetStream was archived Feb 2026. It brings Ragged Paged Attention v3, continuous batching, and prefix caching. What we own on top: the MoE dispatch config, MTP verify scheduling, shape-bucket policy, and the disaggregated prefill/decode topology on Trillium. What we explicitly do not build: our own serving engine — that's a two-year detour to parity.
@@ -335,7 +362,7 @@ Then rerun §4 with active params scaled up to hit the quality gate — say 50B 
 What earns the level in this interview:
 
 - **Driving scope before designing:** defining "quality-per-dollar" as gated-quality-then-cost, fixing the serving-dominant assumption, and choosing the chip *explicitly* — the interviewer should never have to supply the frame.
-- **Arithmetic before architecture:** ridge points (560/313/626 FLOPs/byte), KV bytes per token (4 KB vs 1.15 KB), bytes streamed per decode pass (70 vs 45 GB), and a cost table with stated MBU and price assumptions — every design choice traced to a number, every number's derivation shown.
+- **Arithmetic before architecture:** ridge points (560/313/626 FLOPs/byte), KV bytes per token (4 KB vs 1.15 KB), bytes(B) per decode pass with its regime crossover (70 GB flat for dense vs a routing union that saturates at 350 GB by B≈100), and a cost table that states which ceiling — memory or compute — binds each column, with MBU and price assumptions named. Every design choice traced to a number, every number's derivation shown.
 - **Naming what you would NOT do:** no coarse Mixtral-style experts, no Pallas by default, no post-training quantization, no 1M-context on Trillium, and "port Llama first as the control arm."
 - **Quality-gate discipline:** sliced evals as a shipping gate, AQT so training numerics equal serving numerics, speculation losslessness by construction. Faster-but-worse is a regression.
 - **Citing production precedent, not vibes:** GShard→GLaM→Gemini for MoE-on-TPU, DeepSeek-V3 for MLA/MTP/fine-grained experts, Gemini Flash-from-Pro for the distillation SKU, tpu-inference as the current serving stack.
@@ -365,4 +392,27 @@ What earns the level in this interview:
 
 ## Closing — The One-Minute Version
 
-If the interviewer asks for the whole answer compressed: a dense 70B is the wrong shape for a machine whose ridge point is 300–600 FLOPs/byte, because it maximizes bytes streamed per token. The TPU-native design minimizes bytes at iso-quality along six axes — sparse activation (MoE, ~35B active), compressed KV (MLA, ~7× with int8), tile-aligned shapes (zero padding tax), quantization-aware training (int8/FP8 with no post-hoc quality lottery), co-trained speculation (~1.8× passes-to-tokens), and a chip-sized context strategy (Trillium SKU distilled from an Ironwood flagship). The compounded result is roughly 2–3× quality-per-dollar on serving, gated on sliced iso-quality evals, validated by MBU/acceptance/drop-rate instrumentation on a proxy-scale ladder before the flagship run, with every architecture bet carrying a numbered break-even point and a pre-committed fallback.
+If the interviewer asks for the whole answer compressed: a dense 70B is the wrong shape for a machine whose ridge point is 300–600 FLOPs/byte. The TPU-native design attacks the scarce resources at iso-quality along six axes — sparse activation (MoE, ~35B active: half the active FLOPs everywhere, and the streaming win at small batch), compressed KV (MLA, ~7× with int8 — the lever that actually buys decode batch), tile-aligned shapes (zero padding tax), quantization-aware training (int8/FP8 with no post-hoc quality lottery), co-trained speculation (~1.8× passes-to-tokens in the memory-bound regime), and a chip-sized context strategy (Trillium SKU distilled from an Ironwood flagship). The compounded result is roughly 2× quality-per-dollar on a Trillium replica and 3–5× on Ironwood on paper — presented with its price/MBU/context sliders, gated on sliced iso-quality evals, validated by MBU/acceptance/drop-rate instrumentation on a proxy-scale ladder before the flagship run, with every architecture bet carrying a numbered break-even point and a pre-committed fallback.
+
+---
+
+## Confidence Ledger
+
+Three buckets, because a staff answer knows which of its numbers are load-bearing facts, which are arithmetic on stated assumptions, and which are guesses awaiting a profiler.
+
+**Verified facts** (checkable against public specs and papers):
+- Chip specs: Trillium (v6e) 32 GB HBM @ 1.64 TB/s, ~918 TF bf16, 256-chip pods, 2 SparseCores; Ironwood (TPU7x) 192 GB @ 7.37 TB/s, 4,614 TF FP8, 1.2 TB/s bidir ICI, pods 256/9,216; v5p 95 GB @ 2.76 TB/s; H100 SXM 80 GB @ 3.35 TB/s.
+- Papers and results: DeepSeek-V2 MLA with 93.3% KV reduction (arXiv 2405.04434); DeepSeek-V3 671B/37B, aux-loss-free balancing, MTP (arXiv 2412.19437); sparse upcycling (arXiv 2212.05055); TransMLA (arXiv 2502.07864); MHA2MLA (arXiv 2502.14837); Gemini 1.5/2.5 sparse MoE, Flash distilled from Pro (arXiv 2403.05530, 2507.06261); AQT (github.com/google/aqt).
+- Stack claims: tpu-inference as the unified JAX/vLLM TPU backend with Ragged Paged Attention v3; JetStream archived Feb 2026; Llama-70B geometry (80 layers, GQA-8, head_dim 128 → 320 KB/token bf16 KV).
+
+**Derived numbers** (method shown in the text; assumptions named):
+- Ridge points 560/313/626 FLOPs per byte — peak FLOPs ÷ HBM BW; the Ironwood bf16 313 rests on the *assumed* 2,307 TF (bf16 ≈ FP8/2, unpublished).
+- KV per token: 240 KB GQA-8 bf16 / 70 KB MLA bf16 / 35 KB MLA int8 at 60 layers — bytes-per-head arithmetic.
+- bytes(B): 1−(31/32)^B expert-union fraction on 50 GB shared + 300 GB routed; saturation at ~350 GB by B≈100.
+- Cost table tokens/s and $/1M: the two-ceiling min with MBU 40%, MFU 40%, spec 1.8×, assumed prices — the ~1.0×/~0.5×/~0.17× ratios move with every one of those sliders.
+- Training delta ~$7M and the ~5-month repayment at 100B tok/day; the 3–7×10¹³-token scratch-vs-adapt crossover.
+
+**Priors** (would replace with measurement, per §5's serving prototype and proxy ladder):
+- 40% MBU / 40% MFU achieved; 15%-vs-45% useful-batch split; Path A's 10–15% ICI haircut and 5–10% donor-shape tax.
+- MoE ≈ dense-2×-active at iso-tokens (revealed preference of frontier labs, never a published controlled comparison — gated at proxy scale).
+- MTP acceptance ~85–90% / 1.8× decode; AQT training tax 1.2–1.4×; all hourly prices; the 100B tok/day volume assumption itself.
