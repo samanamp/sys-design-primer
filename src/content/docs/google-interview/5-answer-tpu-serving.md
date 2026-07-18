@@ -88,9 +88,26 @@ tok/s/chip                                p99 TPOT (long-ctx mix ≈ +60% over p
 
 The picture that justifies goodput-aware scheduling: throughput rises monotonically but the *SLO-legal* region ends where the measured occupancy→p99-TPOT curve crosses 40 ms — around **B ≈ 250** for this mix. Note what limits the batch: the bandwidth knee, *not* KV capacity — the pool holds ~600 residents but the SLO stops admitting near 250. Utilization-based autoscaling drives you up this curve past the ceiling; goodput-based scaling parks you at the knee.
 
-**Prefill ceiling.** Prefill is compute-bound: 80 GFLOP/token in the FFN/MoE path. On an 8-chip slice, take ~40% MFU FP8 as a *target with a wide range* — 20–30% is common for MoE prefill once expert-dispatch imbalance and long-context attention bite, and at 30% every prefill fleet number below grows ~1.3×. At the 40% target (~14.8 PFLOPS effective): an 8K prompt ≈ 44 ms. At 128K the quadratic attention term is no longer noise: the FFN term alone is ~700 ms and attention adds a few hundred ms more — **a fully uncached 128K prefill on one slice lands past 1 s and breaches the 800 ms budget outright.** I say that plainly rather than hide it: what covers the p99 in practice is (a) prefix caching — most 128K traffic re-reads uploaded/RAG prefixes, (b) chunked prefill parallelized across slices for the residual, and (c) an explicit SLO carve-out negotiated for *uncached* ≥128K requests (§8). Sustained: ~185K prefill tokens/s per slice at the target MFU.
+**Prefill ceiling — derived, both terms.** Prefill is compute-bound, and it has *two* FLOP terms that cross over with sequence length:
 
-**Fleet.** Peak 20K req/s × 300 output tokens = 6M output tokens/s → 6M / 8K ≈ **~750 decode slices ≈ 6,000 chips**. Prefill demand is driven by the **mean** input length, not the median — with this tail E[len] ≈ 11K vs. a p50 of 6K, and sizing on the p50 under-builds the pool by ~2×. (Median-vs-mean here is an explicit interview signal: queues and fleets bill by the mean.) Raw: 20K × 11K ≈ **220M tokens/s**; at a 60% prefix-cache hit rate — an assumption, and a load-bearing one: every 10 points is ~120 prefill slices (§7) — → 88M tokens/s → 88M / 185K ≈ **~475 prefill slices ≈ 3,800 chips**. Add ~30% for regional peaks not coinciding, failover headroom, and canaries: **~12.7K chips ≈ 50 × 256-chip pods**, spread over 3+ regions. That's under 1.5 Ironwood superpods' worth of silicon — a useful sanity check that the ask is "a pods-scale fleet," not a data-center-scale one.
+```
+Per-token FFN/MoE:  2 × 40B active        = 80 GFLOP/token   (linear in s)
+Causal attention:   ≈ 2 · L · d_model · s²                    (quadratic in s)
+                      (L = 64, d_model ≈ 8,192)
+Slice compute:      8 × 4,614 TF FP8 = 36.9 PF peak × 40% MFU target
+                    ≈ 14.8 PF effective  (MFU is a TARGET with a wide range —
+                     20–30% is common for MoE prefill; at 30% every fleet
+                     number below grows ~1.3×)
+
+s = 8K:    FFN 8,192 × 80 G = 0.66 PF → 44 ms;  attn 0.07 PF → ~5 ms (noise)
+s = 32K:   FFN ~2.6 PF → ~175 ms;               attn ~1.1 PF → ~75 ms (visible)
+s = 128K:  FFN 10.5 PF → ~710 ms;               attn ~18 PF → ~1.2 s (DOMINANT)
+Crossover: attn = FFN at s ≈ 80 G / (2·L·d) ≈ 76K tokens
+```
+
+So **a fully uncached 128K prefill on one slice is ~2 s — 2.5× the 800 ms budget**, not marginally over it; and attention runs below GEMM MFU, so 2 s is the friendly estimate. I say that plainly rather than hide it: what covers the p99 in practice is (a) prefix caching — most 128K traffic re-reads uploaded/RAG prefixes, (b) chunked prefill parallelized across slices for the residual (context-parallel prefill is what makes the ultra tier feasible at all), and (c) an explicit SLO carve-out negotiated for *uncached* ≥128K requests (§8). Sustained throughput: at the fleet's *mean* length (11K), attention adds ~15% over the FFN-only rate → **~160K prefill tokens/s per slice** at the target MFU (185K FFN-only).
+
+**Fleet.** Peak 20K req/s × 300 output tokens = 6M output tokens/s → 6M / 8K ≈ **~750 decode slices ≈ 6,000 chips**. Prefill demand is driven by the **mean** input length, not the median — with this tail E[len] ≈ 11K vs. a p50 of 6K, and sizing on the p50 under-builds the pool by ~2×. (Median-vs-mean here is an explicit interview signal: queues and fleets bill by the mean.) Raw: 20K × 11K ≈ **220M tokens/s**; at a 60% prefix-cache hit rate — an assumption, and a load-bearing one: every 10 points is ~120 prefill slices (§7) — → 88M tokens/s → 88M / 160K ≈ **~550 prefill slices ≈ 4,400 chips**. Add ~30% for regional peaks not coinciding, failover headroom, and canaries: **~13.5K chips ≈ 53 × 256-chip pods**, spread over 3+ regions. That's under 1.5 Ironwood superpods' worth of silicon — a useful sanity check that the ask is "a pods-scale fleet," not a data-center-scale one.
 
 **SLO budget** — where the 800 ms and 40 ms actually go, per component, with an owner (the table I'd put on the whiteboard before any box diagram):
 
@@ -130,9 +147,9 @@ Fleet topology with the §2 numbers attached — every arrow carries its rate, e
         ┌────────────┴──────────────────────────────┐
         ▼                                           ▼
   PREFILL POOL                                DECODE POOL
-  ~158 × 8-chip slices/region                 ~250 × 8-chip slices/region
-  (475 global ≈ 3,800 chips)                  (750 global ≈ 6,000 chips)
-  185K tok/s/slice @ ~40% MFU target          8K out-tok/s/slice @ batch 128
+  ~183 × 8-chip slices/region                 ~250 × 8-chip slices/region
+  (550 global ≈ 4,400 chips)                  (750 global ≈ 6,000 chips)
+  160K tok/s/slice @ ~40% MFU target          8K out-tok/s/slice @ batch 128
   chunked 8–16K, prefix cache 60% hit         continuous batching, 16 ms TPOT p50
         │                                           ▲
         │   KV transfer (per request):              │
@@ -188,7 +205,7 @@ LANE 3 — same 128K prompt, COLOCATED (what we refused to build)
                               inflicted on ~128 innocent in-flight requests
 ```
 
-**Pool sizing is a ratio you retune continuously.** From §2: prefill demand ≈ 475 slices, decode ≈ 750 slices → roughly **1:1.6 prefill:decode** at this workload — prefill is a far bigger share than the p50 input length suggests, because prefill bills by the mean. But the ratio is a function of (input length × cache hit rate) / output length — a product launch that doubles average prompt length flips it. So the autoscaler scales the pools *independently* on their own signals: prefill pool on queue-wait p95 (drives TTFT), decode pool on batch occupancy / KV headroom (drives TPOT).
+**Pool sizing is a ratio you retune continuously.** From §2: prefill demand ≈ 550 slices, decode ≈ 750 slices → roughly **1:1.4 prefill:decode** at this workload — prefill is a far bigger share than the p50 input length suggests, because prefill bills by the mean. But the ratio is a function of (input length × cache hit rate) / output length — a product launch that doubles average prompt length flips it. So the autoscaler scales the pools *independently* on their own signals: prefill pool on queue-wait p95 (drives TTFT), decode pool on batch occupancy / KV headroom (drives TPOT).
 
 **The KV transfer bill.** After prefill, the full KV must move to a decode slice:
 - 8K-context request: 8K × 128 KB = **1 GB**. 128K request: **16 GB**.
@@ -231,9 +248,9 @@ LANE 3 — same 128K prompt, COLOCATED (what we refused to build)
 1. **Weight distribution is a huge-file fan-out problem.** 400 GB × thousands of slices × weekly revisions. Naive pulls from a single blob store melt it. Design: region-local mirrored store, tree/peer-to-peer fan-out within a pod (chips pull shards from ICI neighbors, not from the network), content-addressed shards so a revision that touches 10% of weights ships 10% of bytes. Rollout is region-by-region canary with per-revision perf CI (below), and the previous revision stays resident on disk for instant rollback.
 2. **Failover is a KV-loss event.** Cross-region failover drops prefix caches and any in-flight KV — the surviving regions see a cache-hit-rate crater and thus a *prefill demand spike* exactly when they've absorbed extra traffic. Walk the arithmetic, because it's where naive N-1 sizing fails:
 
-   **Region-loss walkthrough (lose 1 of 3 at peak).** Steady state per region: ~6.7K req/s, ~158 prefill slices, ~250 decode slices, 60% prefix hit → ~30M prefill tok/s per region actually computed.
+   **Region-loss walkthrough (lose 1 of 3 at peak).** Steady state per region: ~6.7K req/s, ~183 prefill slices, ~250 decode slices, 60% prefix hit → ~30M prefill tok/s per region actually computed.
    - *Traffic:* each survivor now takes ~10K req/s — **×1.5**. Decode demand scales linearly: 250 → ~375 slices needed; the 30% headroom (250 → ~325) plus shedding the batch class's decode share and riding occupancy from B = 128 toward the ~250 knee (the KV pool has the slots — §2) closes it. Decode is the easy half.
-   - *Cache crater, steady state:* a third of each survivor's traffic is diverted users whose prefixes exist in *no* local cache — 0% hit. Blended hit falls 60% → ~40%, so **miss rate goes 40% → 60% (×1.5)** on ×1.5 traffic → prefill demand **×2.25**: 158 slices of load becomes ~355 against ~205 provisioned with headroom.
+   - *Cache crater, steady state:* a third of each survivor's traffic is diverted users whose prefixes exist in *no* local cache — 0% hit. Blended hit falls 60% → ~40%, so **miss rate goes 40% → 60% (×1.5)** on ×1.5 traffic → prefill demand **×2.25**: 183 slices of load becomes ~412 against ~238 provisioned with headroom.
    - *Transient is worse than ×2.25:* the ×2.25 is the *post-failover steady state*. During re-warm, the flood of cold prefills evicts warm entries, so blended hit dips **below** 40% — call it ~30% → miss ×1.75 on ×1.5 traffic → **~×2.6**, i.e. ~410 slices of demand at the trough. (The extreme case the model must cover: a surface at 80% hit cratering to 0% is miss 20% → 100% — **×5** from cache loss alone, before any traffic shift.)
    - *Closing the gap — with numbers, not verbs.* Transient gap ≈ 410 − 205 = **~205 slices (~1,640 chips)**. Sized mitigations: batch-class prefill shed frees only **~15 slices** at peak — batch is a *trough-filler*, so there's little of it to shed exactly when a peak-hour failover needs it; the regional warm pool contributes **~30 slices**; admission-clamping *uncached* ≥128K prefills (about 2% of requests but ~23% of raw prefill tokens, and almost all uncached post-failover) sheds **~80 slices** of demand under the stratified SLO (§8). Total ≈ 125 slices — leaving an honest **residual of ~80 slices**, which manifests as prefill queueing: degraded TTFT for the standard class for the duration of cache re-warm. That duration is bounded: at ~30M+ tok/s of cold traffic per survivor, the prefix caches repopulate in single-digit minutes, and demand decays from ×2.6 toward ×2.25 toward ×1.5 as hit rate recovers.
    - *The sizing rule this implies:* **prefill pool ≥ transient post-failover demand minus honestly-sized sheddable load, for the re-warm window** — and if the business requires the full TTFT SLO to hold through a peak-hour region loss, the answer is ~1.5× prefill headroom instead of 1.3×, stated as a priced decision, not a flat margin. This is the kind of arithmetic that only exists if you did §2 out loud.
@@ -270,7 +287,7 @@ What it costs, stated honestly: per-tier failover headroom (N−1 reserved in ea
 
 ## 7. Cost per Token — Derivation and the Three Levers
 
-Cost/token = (chips × $/chip-hr) / (tokens/hr within SLO). Illustrative: at ~$2/chip-hr, a decode chip producing ~1,000 tok/s → ~**$0.56 per million output tokens** decode-side; the full ~12.7K-chip fleet at ~$25K/hr over 6M output tok/s ≈ 21.6B tok/hr → ~**$1.18/M output tokens all-in** (prefill, headroom, and canaries carried by output tokens). The absolute number is assumption-laden; the *ranking of levers* is robust:
+Cost/token = (chips × $/chip-hr) / (tokens/hr within SLO). Illustrative: at ~$2/chip-hr, a decode chip producing ~1,000 tok/s → ~**$0.56 per million output tokens** decode-side; the full ~13.5K-chip fleet at ~$27K/hr over 6M output tok/s ≈ 21.6B tok/hr → ~**$1.18/M output tokens all-in** (prefill, headroom, and canaries carried by output tokens). The absolute number is assumption-laden; the *ranking of levers* is robust:
 
 | # | Lever | Mechanism | Δ cost/M output tokens (illustrative) | Why this rank |
 |---|---|---|---|---|
@@ -329,7 +346,7 @@ Where each class of number in this answer comes from — the same honesty I'd vo
 
 **Derived (arithmetic from stated assumptions — right method, ±2× constants):**
 - 128 KB KV/token; blended ~1.4–1.5 GB KV/request from the length mix; E[len] ≈ 11K.
-- 16 ms decode step at B = 128; the batch curve and the B ≈ 250 bandwidth knee; ~600-slot KV capacity; 750 decode + 475 prefill slices → ~12.7K chips.
+- 16 ms decode step at B = 128; the batch curve and the B ≈ 250 bandwidth knee; ~600-slot KV capacity; 750 decode + 550 prefill slices → ~13.5K chips.
 - The failover ×1.5 / ×2.25 / ~×2.6 cascade and the 205-slice transient gap with its ~80-slice residual.
 - Speculation slot economics: (αk+1)/(k+1), effective TPOT = step_time_spec/(αk+1).
 
