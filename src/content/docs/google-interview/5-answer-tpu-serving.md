@@ -242,6 +242,22 @@ Reliability culture reference: the Gemini training report (arXiv 2312.11805) des
 
 ---
 
+## 5.5 Length-Stratified Subfleets — Why the Decode Pool Should Not Be One Pool
+
+The mixed-decode design above has a structural flaw the admission clamp only papers over: **long-context requests are contagious**. Decode step time on a slice is shared — step ≈ (weights + ΣKV over all residents) / BW — so one admitted 1M-context request (~128 GB KV) adds ~128 GB / 36.9 TB/s ≈ **+3.5 ms to every step, ~+22% TPOT for all ~127 cohabitants**. Three such residents and the slice breaches p99 TPOT for everyone on it. KV streaming is a shared-bandwidth tax, not a private cost, so the tail doesn't just pay more — it makes the median pay.
+
+The structural fix is to stratify the decode fleet by context tier:
+
+| Tier | Context | Config | Operating point |
+| --- | --- | --- | --- |
+| Short | ≤16K | knee-batch slices (B≈200–250), minimal KV headroom | throughput-optimal; the bulk of the fleet |
+| Long | 16K–256K | low batch (B≈16–32), KV pool dominant, CP-sharded prefill feeding it | latency-honest TPOT at high per-request KV |
+| Ultra | >256K | dedicated slices, B≈2–8, product-tier pricing/SLO | capacity product, not a latency product |
+
+What this buys, in order of value: (1) **isolation** — the contagion math above becomes impossible by construction; (2) **predictability** — each tier has a homogeneous KV-per-request, so its batch/TPOT curve is honest instead of a blended average (the exact averaging that makes mixed-pool capacity math treacherous); (3) **per-tier operating points** — the short tier rides the bandwidth knee while the long tier trades batch for residency, instead of one compromise batch for both; (4) **clean signals** — a long-context burst reads as "long tier needs slices," not fleet-wide TPOT drift.
+
+What it costs, stated honestly: per-tier failover headroom (N−1 reserved in each pool beats pooled slack by less than it looks), a tier-migration path — input length is known at admission but output growth and multi-turn accumulation are not, so sessions cross tiers mid-conversation and need either inter-pool KV transfer (a Pathways-managed move, priced like the prefill→decode transfer in §4) or a re-prefill against the prefix cache — and split prefix-cache locality. The break-even is tier size: stratification pays when every tier is big enough to batch efficiently alone. At this design's ~13K-chip scale each tier is thousands of chips — stratify. At a 100-chip deployment, don't; run mixed with admission clamps and accept the tail coupling.
+
 ## 6. Monitoring — What I'd Actually Page On
 
 - **SLO surfaces:** TTFT and TPOT p50/p95/p99 *sliced by input-length bucket, region, and priority class* — a global p99 hides a single region or a single length bucket burning. Plus **goodput under SLO** as the headline fleet metric, decomposed scheduling/runtime/program so a regression is attributable.
