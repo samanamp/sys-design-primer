@@ -103,7 +103,7 @@ Committing to concrete numbers up front — every one defensible against §2's c
 
 ### 3.1 MoE instead of dense
 
-**The economics.** Scaling-law results since GLaM: an MoE with N_active ≈ 35B and 8–10× total/active ratio matches a dense model of roughly 1.5–2× its active count at equal training tokens. So ~35B active can gate against dense 70B quality — a claim strongly suggested by every frontier lab's revealed preference (Gemini 1.5/2.5, DeepSeek-V3, GLaM all shipped sparse), but never published as a controlled iso-token MoE-vs-dense comparison; that's why the proxy ladder in §5 gates on it, and the "what if it's only 1.3×" follow-up in §6 prices the downside.
+**The economics.** Scaling-law results since GLaM: an MoE with N_active ≈ 35B and 8–10× total/active ratio matches a dense model of roughly 1.5–2× its active count at equal training tokens. So ~35B active can gate against dense 70B quality — a claim supported by controlled small-scale results (Switch Transformer's iso-FLOP wins; DeepSeekMoE's ~2B-scale controls; MoE scaling laws — Clark 2022, Krajewski 2024 — fitting a 1.5–3× effective-param multiplier that grows with expert granularity) and by every frontier lab's revealed preference (Gemini 1.5/2.5, DeepSeek-V3, GLaM shipped sparse), but never published as a controlled iso-token comparison at frontier scale; that's why the proxy ladder in §5 gates on it, and the "what if it's only 1.3×" follow-up in §6 prices the downside.
 
 The serving-bytes story, done honestly. With top-8-of-256 routing per layer, the *union* of experts a batch touches grows fast: expected fraction touched ≈ 1 − (1 − 8/256)^B. Per pass, with ~50 GB of always-touched weights (attention, shared expert, embeddings) and ~300 GB of routed experts, all int8:
 
