@@ -1,0 +1,408 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet-Wide ML Performance Regression Detection — Staff Model Answer</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--sig-bg:#eef3ec;--fu-bg:#eef0f5;--art-bg:#f4efe4}
+@media (prefers-color-scheme: dark){:root{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--sig-bg:#1c241d;--fu-bg:#1b1f2a;--art-bg:#241f14}}
+:root[data-theme="dark"]{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--sig-bg:#1c241d;--fu-bg:#1b1f2a;--art-bg:#241f14}
+:root[data-theme="light"]{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--sig-bg:#eef3ec;--fu-bg:#eef0f5;--art-bg:#f4efe4}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,sans-serif;margin:0;padding:2rem 1rem 6rem}
+main{max-width:900px;margin:0 auto}
+h1{font-size:1.7rem;line-height:1.25;margin:.2rem 0}
+h2{font-size:1.25rem;margin:2.6rem 0 .6rem;padding-top:1rem;border-top:2px solid var(--line)}
+h3{font-size:1.02rem;margin:1.6rem 0 .4rem}
+p{margin:.55rem 0}
+.sub{color:var(--muted)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--code-bg);padding:.08rem .32rem;border-radius:4px;font-size:.85em}
+pre{background:var(--code-bg);border-radius:8px;padding:.8rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;font-size:.86rem;margin:.7rem 0}
+th{text-align:left;color:var(--muted);border-bottom:1.5px solid var(--line);padding:.3rem .6rem .3rem 0}
+td{padding:.34rem .6rem .34rem 0;border-bottom:1px solid var(--line);vertical-align:top}
+.num{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace;font-size:.84rem}
+.toc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.3rem;margin:1.4rem 0;font-size:.9rem}
+.toc a{color:var(--accent);text-decoration:none}
+.toc ol{margin:.3rem 0;padding-left:1.3rem}
+.sig{background:var(--sig-bg);border-left:4px solid var(--good);border-radius:6px;padding:.7rem 1rem;margin:1rem 0;font-size:.92rem}
+.sig b:first-child{color:var(--good)}
+.fu{background:var(--fu-bg);border-left:4px solid var(--accent);border-radius:6px;padding:.7rem 1rem;margin:1rem 0;font-size:.92rem}
+.fu b.q{color:var(--accent)}
+.art{background:var(--art-bg);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.1rem;margin:1rem 0}
+.art .lbl{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:.4rem}
+svg{max-width:100%;height:auto;display:block;margin:.8rem auto}
+svg text{font-family:ui-monospace,Menlo,monospace}
+.dia{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.6rem;overflow-x:auto}
+.kv{color:var(--muted)}
+.warn{color:var(--bad);font-weight:600}
+.ok{color:var(--good);font-weight:600}
+hr{border:none;border-top:1px solid var(--line);margin:2rem 0}
+</style>
+<main>
+<h1>Fleet-Wide ML Performance Regression Detection</h1>
+<p class="sub">A staff-level model answer, written out in full. Primary fleet: TPU (v5e / Trillium / Ironwood, XLA weekly releases). Secondary: GPU (H100 / B200, CUDA/driver/TRT-LLM matrix). All arithmetic uses the worked-example config defined in §7 and is consistent across sections.</p>
+
+<nav class="toc"><b>Contents</b>
+<ol>
+<li><a href="#s1">Clarifying questions, requirements, capacity math</a></li>
+<li><a href="#s2">High-level architecture</a></li>
+<li><a href="#s3">Benchmark suite design</a></li>
+<li><a href="#s4">The statistics of regression detection</a></li>
+<li><a href="#s5">Tiered execution strategy</a></li>
+<li><a href="#s6">Root-cause attribution + worked example</a></li>
+<li><a href="#s7">Trace and log artifacts (before/after)</a></li>
+<li><a href="#s8">Production integration and rollout safety</a></li>
+<li><a href="#s9">Evolution and hard problems</a></li>
+<li><a href="#s10">60-minute delivery run sheet</a></li>
+</ol></nav>
+
+<h2 id="s1">1 · Clarifying Questions, Requirements, Capacity Math</h2>
+<p>The questions I ask before designing anything, each with the assumption I proceed on:</p>
+<table>
+<tr><th>Question</th><th>Why it changes the design</th><th>Assumed answer</th></tr>
+<tr><td>Are we gating <em>releases</em> (compiler) or <em>models</em> (retrains)?</td><td>Gating axis determines what a "series" is and who gets paged</td><td>Both, but compiler releases are the primary gate; model retrains reuse the same rails</td></tr>
+<tr><td>What rolls out weekly?</td><td>Sets detection-latency budget</td><td>XLA release cut Monday, prod rollout Thursday → <b>72 h budget</b> end-to-end; nightlies get a smoke signal in <b>&lt; 4 h</b></td></tr>
+<tr><td>Fleet composition?</td><td>Variance model and version matrix differ radically</td><td>~85% TPU (v5e legacy, Trillium bulk, Ironwood ramping), ~15% GPU (H100 → B200). GPU adds a 3-axis version matrix (driver × CUDA × serving stack) that TPU doesn't have</td></tr>
+<tr><td>How many models matter?</td><td>Coverage strategy</td><td>~300 production models; top 20 ≈ 80% of fleet spend (spend-weighted coverage, not model-count coverage)</td></tr>
+<tr><td>What is a regression <em>in dollars</em>?</td><td>Sets the minimum detectable effect worth building for</td><td>1% fleet-wide cost/token ≈ order $10M/yr — <b>1% is the target MDE</b> on the top tier, not 5%</td></tr>
+<tr><td>Who consumes verdicts?</td><td>Attribution is a product with two customers</td><td>Compiler team (needs culprit CL + HLO diff) and model teams (needs "your model, this config, this much, here's the trace")</td></tr>
+</table>
+<p><b>Functional requirements:</b> detect regressions in TTFT, TPOT, goodput, MFU, HBM-BW utilization, cost/token across model × platform × config series; attribute to culprit commit (compiler axis) or config delta (hardware axis); gate releases; track improvements (§9) as first-class.</p>
+<p><b>SLOs for the detection system itself</b> — a detector without its own SLOs becomes an unowned dashboard:</p>
+<table>
+<tr><th>SLO</th><th>Target</th><th>Rationale</th></tr>
+<tr><td>Detection latency (release-blocking tier)</td><td class="num">&lt; 24 h from RC cut</td><td>Leaves 48 h of the 72 h window for triage + fix/rollback decision</td></tr>
+<tr><td>Detection latency (smoke tier)</td><td class="num">&lt; 4 h from nightly</td><td>Narrows any later bisection to ~1 day of commits</td></tr>
+<tr><td>False-page budget</td><td class="num">≤ 5 pages/week fleet-wide</td><td>One triage rotation absorbs this; beyond it, gates get ignored (§8)</td></tr>
+<tr><td>Coverage</td><td class="num">≥ 95% of fleet spend in T1; 100% of models monthly</td><td>Spend-weighted; the long tail rotates (§5)</td></tr>
+<tr><td>MDE @ power 0.9</td><td class="num">1% (top-20), 3% (tail)</td><td>Derived from the dollar value of 1% and the repeat budget (§4)</td></tr>
+</table>
+<h3>The capacity math that forces the design</h3>
+<pre>Naive full matrix, per sweep:
+  300 models × 4 platforms (v5e, v6e, Ironwood, B200) × 6 configs
+  (2 batch regimes × {bf16,int8/fp8} × {short,long ctx})     = 7,200 points
+  × 5 repeats × 15 min                                        = 9,000 chip-hours/sweep
+Release cadence: 7 nightlies + 1 RC = 8 sweeps/week           = 72,000 chip-hours/week
+                                                              ≈ 429 chips running 24/7
+</pre>
+<p>That is a dedicated mid-size pod doing nothing but benchmarking — order $15–25M/yr of hardware — and it <em>still</em> doesn't cover new-silicon qualification. Nobody funds that, and nobody should: the matrix is massively redundant (most models are HLO-similar to each other, most nightlies change nothing perf-relevant). The design problem is therefore <b>coverage per chip-hour</b>, which is what the tiering in §5 optimizes. Target budget: ~4,500 chip-hours/week, ~6% of naive, with ≥95% spend-weighted coverage.</p>
+<div class="sig"><b>Staff signal:</b> leading with the cost/coverage capacity math — and with SLOs <em>for the detector itself</em> including a false-page budget — frames the whole problem as an engineering-economics design rather than "run benchmarks, alert on diffs." L5 answers start drawing the pipeline; L6 answers first prove the naive pipeline is unaffordable and derive what any affordable one must do.</div>
+
+<h2 id="s2">2 · High-Level Architecture</h2>
+<div class="dia"><svg viewBox="0 0 860 400" width="860" height="400">
+<style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.t{font-size:12px;fill:var(--ink)}.s{font-size:10px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.6;marker-end:url(#ar)}.g{fill:var(--accent-soft);stroke:var(--accent)}</style>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="b" x="10" y="20" width="150" height="52"/><text class="t" x="22" y="42">XLA repo</text><text class="s" x="22" y="58">commits · nightly · RC cut</text>
+<rect class="b g" x="220" y="10" width="180" height="44"/><text class="t" x="232" y="28">T0 smoke (per nightly)</text><text class="s" x="232" y="44">12 canaries · &lt;4h verdict</text>
+<rect class="b g" x="220" y="66" width="180" height="44"/><text class="t" x="232" y="84">T1 release-qual (per RC)</text><text class="s" x="232" y="100">spend-weighted 60 · &lt;24h</text>
+<rect class="b g" x="220" y="122" width="180" height="44"/><text class="t" x="232" y="140">T2 hw-qual / monthly full</text><text class="s" x="232" y="156">all 300 · new silicon</text>
+<rect class="b" x="460" y="60" width="170" height="64"/><text class="t" x="472" y="80">Results store</text><text class="s" x="472" y="96">metric series + traces +</text><text class="s" x="472" y="110">HLO snapshots, keyed by CL</text>
+<rect class="b" x="690" y="20" width="160" height="52"/><text class="t" x="702" y="40">Detector</text><text class="s" x="702" y="56">changepoint + FDR (§4)</text>
+<rect class="b" x="690" y="96" width="160" height="52"/><text class="t" x="702" y="116">Attribution</text><text class="s" x="702" y="132">bisect · HLO diff · traces</text>
+<rect class="b" x="690" y="172" width="160" height="52"/><text class="t" x="702" y="192">Gate + paging</text><text class="s" x="702" y="208">block / bug / page (§8)</text>
+<rect class="b" x="220" y="200" width="180" height="52"/><text class="t" x="232" y="220">Bench executor fleet</text><text class="s" x="232" y="236">reserved sub-pods, pinned</text>
+<rect class="b" x="460" y="200" width="170" height="52"/><text class="t" x="472" y="220">Prod canary (§8)</text><text class="s" x="472" y="236">1–5% traffic slices</text>
+<rect class="b" x="10" y="300" width="840" height="80"/><text class="t" x="22" y="322">Placement in the release pipeline</text>
+<text class="s" x="22" y="344">pre-submit: cost-model / roofline static check only (no chips) → post-submit nightly: T0 smoke → RC cut: T1 gate (blocking)</text>
+<text class="s" x="22" y="362">→ prod rollout: compiler canary on live traffic slices → fleet. New silicon: T2 + pre-silicon simulator correlation (§9).</text>
+<line class="a" x1="160" y1="40" x2="220" y2="32"/><line class="a" x1="160" y1="50" x2="220" y2="88"/><line class="a" x1="160" y1="60" x2="220" y2="144"/>
+<line class="a" x1="400" y1="32" x2="460" y2="80"/><line class="a" x1="400" y1="88" x2="460" y2="92"/><line class="a" x1="400" y1="144" x2="460" y2="104"/>
+<line class="a" x1="630" y1="80" x2="690" y2="46"/><line class="a" x1="630" y1="92" x2="690" y2="122"/>
+<line class="a" x1="770" y1="72" x2="770" y2="96"/><line class="a" x1="770" y1="148" x2="770" y2="172"/>
+<line class="a" x1="310" y1="166" x2="310" y2="200"/><line class="a" x1="545" y1="124" x2="545" y2="200"/>
+</svg></div>
+<p>Key placements, and why: <b>pre-submit gets no chips</b> — per-commit hardware benchmarking of a compiler is unaffordable and unnecessary; pre-submit runs static checks only (HLO cost-model deltas, fusion-count diffs, roofline estimates on canonical HLO — flags "this CL changes generated code for N benchmarks" so the nightly knows where to look). <b>Nightly T0</b> exists to keep bisection ranges small (~1 day ≈ 30–60 CLs), not to gate. <b>T1 is the release gate</b> and owns the 24 h SLO. <b>Prod canary</b> (§8) is the backstop for what benchmarks structurally can't see: real traffic mixes, real cache hit rates, real interference. Every result row is keyed by (model-rev, HLO fingerprint, compiler CL, platform, config, firmware) — the fingerprint is what makes attribution and dedup possible later.</p>
+<div class="sig"><b>Staff signal:</b> refusing to put chips in pre-submit — and saying why in cost terms — plus using the nightly tier explicitly as a <em>bisection-range compressor</em> rather than a gate, shows the tiers were derived from the capacity math and the triage workflow, not copied from a CI diagram.</div>
+<h2 id="s3">3 · Benchmark Suite Design</h2>
+<h3>3.1 Workload selection and stratification</h3>
+<p>The suite is stratified so that every axis that changes the <em>bottleneck</em> is represented, because a regression only reproduces in the regime where its resource is binding:</p>
+<table>
+<tr><th>Stratum</th><th>Axis values</th><th>Why it's a stratum</th></tr>
+<tr><td>Phase regime</td><td>prefill-heavy (8K/32K prompt) vs decode-heavy (B∈{8,64}, long-lived)</td><td>Compute-bound vs memory-bound: the same code change can be invisible in one and 8% in the other (§6's example)</td></tr>
+<tr><td>Architecture</td><td>dense 8B/70B-class · MoE (fine-grained, top-8) · embedding-heavy ranking (SparseCore path)</td><td>Different op mixes exercise different compiler passes (fusion, all-to-all layout, embedding lowering)</td></tr>
+<tr><td>Numerics</td><td>bf16 · int8 (AQT) · fp8 (Ironwood/B200 only)</td><td>Quantized paths have their own kernels and their own regressions</td></tr>
+<tr><td>Geometry</td><td>MXU-aligned shapes AND deliberately misaligned ones (head-dim 64, odd vocab)</td><td>See below — measuring the hardware vs measuring a mismatch</td></tr>
+<tr><td>Scale</td><td>single-chip · slice (ICI collectives in path) · multislice (DCN)</td><td>Collective regressions never reproduce on one chip</td></tr>
+</table>
+<p><b>The geometry-honesty point.</b> A head-dim-64 model on Trillium's 256×256 MXU pads every attention GEMM tile 4× — it runs at ≤25% of the MXU by construction. If that model is in the suite <em>as a hardware benchmark</em>, it reports "Trillium is slow," which is false; the truth is "this shape wastes Trillium." The suite must carry both, <em>labeled</em>: geometry-matched variants measure <b>hardware capability</b> (regressions here are compiler/hardware bugs); production-shaped variants measure <b>delivered performance</b> (regressions here may be padding/layout decisions — still real dollars, different owner). Conflating the two poisons cross-hardware claims (§9) and misroutes pages.</p>
+<h3>3.2 Metrics — precise definitions, and how they lie</h3>
+<table>
+<tr><th>Metric</th><th>Definition (exact)</th><th>How it silently lies</th></tr>
+<tr><td>TTFT</td><td>request admitted → first output token committed; report p50/p99 per config</td><td>Queue-wait exclusion hides scheduler regressions; include it, and also report compute-only prefill time separately</td></tr>
+<tr><td>TPOT</td><td>steady-state decode: (t<sub>last</sub> − t<sub>first</sub>)/(n−1) at fixed resident batch</td><td>Measured at unspecified batch, it's meaningless — batch is half the roofline. Every TPOT is (TPOT | B, s̄)</td></tr>
+<tr><td>Goodput</td><td>tokens/s/chip <em>while p99 TPOT ≤ SLO and p99 TTFT ≤ SLO</em>, at the arrival rate that maximizes it</td><td>Throughput without the SLO clause rewards batch inflation that ships unusable latency</td></tr>
+<tr><td>MFU</td><td>model FLOPs (analytic, fwd 2·P<sub>active</sub>/token + exact attention term) ÷ (peak dense FLOPS of the claimed dtype × chips × wall time)</td><td>Three classic lies: counting <b>rematerialization</b> FLOPs in the numerator (inflates training MFU 20–30%); forgetting the <b>causal ½</b> on attention (inflates the attention term 2×); MoE accounted at <b>total</b> instead of activated params (inflates 10×). Fix: numerator is <em>useful algorithmic work only</em>, defined once in code, shared by every consumer</td></tr>
+<tr><td>HBM BW util</td><td>counter-measured bytes/s ÷ platform peak (per chip, averaged over the measurement window)</td><td>DMA prefetch double-counting; window boundaries clipping bursts. Use the hardware counters, not analytic bytes</td></tr>
+<tr><td>Cost/token</td><td>(chips × internal $/chip-hr) ÷ goodput — <em>at the goodput operating point</em></td><td>Priced at max throughput instead of the SLO point; and internal vs external $/chip-hr changes every cross-platform ranking — state the basis</td></tr>
+</table>
+<h3>3.3 Load generation</h3>
+<p><b>Open-loop</b> (Poisson arrivals at fixed rate λ, timestamps independent of completions) for anything with an SLO in it: closed-loop load generators wait for a response before sending the next request, so when the system slows, offered load drops — the generator <em>colludes with the system under test</em> to hide tail latency (coordinated omission). Closed-loop is kept only for max-throughput ceiling measurement, labeled as such. Arrival mix: trace-derived length distributions per model (p50/p95/p99 input and output lengths sampled from production logs, refreshed monthly) — synthetic uniform lengths miss both the prefix-cache and the long-tail-KV behavior that decide real goodput. Warm-up is discarded (first 2 min: compile cache fill, allocator steady-state, cache warm), and each measurement window is long enough for ≥ 10× the longest request.</p>
+<div class="sig"><b>Staff signal:</b> the MFU-accounting-lies table and the geometry-matched-vs-production-shaped split are benchmark <em>honesty</em> engineering — the difference between a suite that measures the fleet and one that generates plausible numbers. L5 lists metrics; L6 defines each one's denominator and names the three ways it gets gamed, because the detector's verdicts are only as trustworthy as the metric definitions.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§3)</b><br>
+<b>Q: Your benchmark models drift from production models — retrains change shapes quarterly. How does the suite stay representative?</b><br>
+A: The suite is keyed by HLO fingerprint, not model name. A weekly job fingerprints every production model's serving HLO, clusters by op/fusion signature, and diffs cluster membership against the suite; when a cluster's representative drifts past a similarity threshold, the suite auto-adopts the new HLO (with its production trace-derived load mix) and re-baselines that series. Baselines are never carried across fingerprint changes — that's how you avoid "regression" alerts that are actually model changes.<br>
+<b>Q: Why not just benchmark on production replicas with mirrored traffic and skip the synthetic suite?</b><br>
+A: Mirrored traffic is the canary tier (§8), and it's essential — but it can't gate releases: you can't run 8 compiler versions against production simultaneously, you can't hold traffic constant across a week, and you can't reproduce a measurement for bisection. The synthetic suite exists to make the input a controlled variable; the canary exists to catch what control misses. You need both, and each one's weakness is the other's job.<br>
+<b>Q: How do you benchmark the prefix-cache-dependent goodput honestly?</b><br>
+A: Replay length-and-prefix-structured traces (session trees sampled from production, anonymized), report goodput at the production-observed hit rate <em>and</em> at hit=0 as a bracket. A compiler change can't move the hit rate, so for release gating the hit=0 series is the sensitive one; the bracketed pair exists so capacity planning doesn't misread the gate numbers.</div>
+
+<h2 id="s4">4 · The Statistics of Regression Detection</h2>
+<h3>4.1 Variance sources and realistic magnitudes</h3>
+<table>
+<tr><th>Source</th><th>TPU magnitude</th><th>GPU magnitude</th><th>Control</th></tr>
+<tr><td>Run-to-run, same chip, pinned everything</td><td class="num">0.2–0.6% (deterministic execution, AOT compile)</td><td class="num">1.5–4% (DVFS, clock/thermal state)</td><td>GPU: lock clocks (<code>nvidia-smi -lgc</code>), fixed power limit, thermal soak before measuring</td></tr>
+<tr><td>Host jitter (input feed, RPC)</td><td class="num">0.3–1%</td><td class="num">0.5–2%</td><td>Dedicated hosts, pinned CPUs, warm-up discard</td></tr>
+<tr><td>Cell/chip heterogeneity (binning, HBM vendor)</td><td class="num">0.5–1.5% across chips</td><td class="num">1–3%</td><td>Benchmark on a <em>reserved, fixed</em> set of chips; treat chip-set change as a baseline reset</td></tr>
+<tr><td>ICI/NVLink congestion from neighbors</td><td class="num">0–2% if shared</td><td class="num">0–3%</td><td>Reserved sub-pods; never benchmark on scavenger capacity</td></tr>
+</table>
+<p>Net, with controls: <b>σ ≈ 0.4% on TPU, σ ≈ 2% on GPU</b> for latency-class metrics. This single asymmetry drives different repeat counts, different MDEs, and is an honest reason TPU fleets are easier to regression-test — determinism is an operability feature.</p>
+<h3>4.2 Noise floors, empirically</h3>
+<p>Per (model, platform, config, metric) series: 30 runs across ≥ 5 days and ≥ 3 chip-sets <em>with no software changes</em> establish the null distribution. Store median and MAD (robust to the occasional infra hiccup); the noise band is ±3·MAD<sub>normalized</sub>. Re-derive quarterly and on any executor-fleet change. Series whose empirical σ exceeds 2× the platform norm get quarantined and investigated as <em>infrastructure</em> bugs — a noisy series is a defect of the harness, not a fact of nature to alert around.</p>
+<h3>4.3 Detection method — chosen, with reasons</h3>
+<p>Two consumers, two methods:</p>
+<p><b>(a) Release gate (T1):</b> two-sample comparison of RC vs current-prod release, n repeats each. Welch/Mann-Whitney p-value <em>plus</em> a minimum-effect filter: fire only if p &lt; α<sub>adj</sub> <b>and</b> observed Δ &gt; max(MDE<sub>tier</sub>, 2σ). The effect-size filter is what keeps statistically-significant-but-economically-irrelevant 0.3% wiggles out of the gate.</p>
+<p><b>(b) Trend monitoring (nightly series):</b> changepoint detection — E-divisive / PELT-class — on each series. Why changepoint over fixed thresholds: it localizes the <em>day</em> the level shifted (directly seeding bisection), composes evidence across noisy points instead of judging each nightly alone, and survives slow drift + step mixtures. Why not pure sequential tests (CUSUM per point): they're optimal for a known shift size, but we care about unknown sizes and want the localization for free.</p>
+<h3>4.4 Multiple comparisons → false-page budget → on-call load</h3>
+<pre>Series under gate: 60 models × 2 platforms × 3 configs × 6 metrics ≈ 2,160 tests per RC
+Naive α = 0.05                    → ~108 expected false positives per release. Untriageable.
+Benjamini–Hochberg FDR at 5% on the gated family, plus the 2σ effect filter:
+  expected false pages ≈ 0.05 × (true alerts, typically 5–15) ≈ &lt; 1/RC
+Nightly trend family (~4,000 series): changepoint alerts routed to a queue, not a pager;
+only spend-weighted top-20 series page directly.
+Result: ≈ 3–5 pages/week — matches the §1 budget and one triage rotation.</pre>
+<h3>4.5 Statistical power — choosing n per tier</h3>
+<pre>n per arm to detect Δ at significance α=0.05, power 0.9 (z<sub>α/2</sub>=1.96, z<sub>β</sub>=1.28):
+  n ≈ 2 · (1.96+1.28)² · (σ/Δ)²  =  21 · (σ/Δ)²
+
+TPU, σ=0.4%:  Δ=1% → n ≈ 3.4 → 5 repeats (margin for discard)   [T1 top-20]
+              Δ=3% → n ≈ 1   → 3 repeats                         [T1 tail / T0]
+GPU, σ=2%:    Δ=1% → n ≈ 84  → unaffordable → either pin clocks harder,
+              or accept MDE=4% at n=6 and let the prod canary own the 1–4% band.
+</pre>
+<p>That last line is a real design decision stated honestly: on GPU, small regressions are caught in canary (big N from live traffic), not in benchmarks — and the alert docs say so, so nobody believes GPU benchmarks are certifying 1%.</p>
+<div class="dia"><svg viewBox="0 0 860 240" width="860" height="240">
+<style>.ax{stroke:var(--muted);stroke-width:1}.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}</style>
+<line class="ax" x1="60" y1="200" x2="840" y2="200"/><line class="ax" x1="60" y1="20" x2="60" y2="200"/>
+<text class="s" x="8" y="60">TPOT</text><text class="s" x="8" y="74">(ms)</text>
+<text class="s" x="20" y="105">4.2</text><text class="s" x="20" y="164">3.9</text>
+<rect x="60" y="148" width="500" height="24" fill="var(--accent-soft)" opacity="0.7"/>
+<text class="s" x="70" y="143">noise band = median ± 3·MAD (3.90 ± 0.05 ms)</text>
+<polyline fill="none" stroke="var(--accent)" stroke-width="1.6" points="60,161 100,158 140,163 180,159 220,162 260,157 300,161 340,160 380,164 420,158 460,161 500,160 540,159 560,101 600,104 640,99 680,103 720,101 760,105 800,102"/>
+<line x1="550" y1="30" x2="550" y2="200" stroke="var(--bad)" stroke-dasharray="4 3" stroke-width="1.5"/>
+<text class="t" x="558" y="40" fill="var(--bad)">changepoint: nightly 2026-06-17 (xla @ a41f…)</text>
+<text class="s" x="558" y="56">level shift +0.32 ms (+8.2%), E-divisive p&lt;0.001</text>
+<text class="s" x="558" y="72">→ alert fires; bisection range = 1 nightly (38 CLs)</text>
+<text class="s" x="60" y="216">nightly runs (each dot = median of 3) — series: chat-8b · v6e-4 · decode B=64 · TPOT p50</text>
+<text class="s" x="700" y="188" fill="var(--good)">baseline 3.90 ms</text>
+</svg></div>
+<div class="sig"><b>Staff signal:</b> mapping α → expected pages → one on-call rotation makes the false-positive budget an <em>organizational</em> design constraint, and the power calculation makes n a derived quantity instead of folklore ("we run 5 times"). The honest GPU concession — benchmarks certify 4%, canary owns 1–4% — is the kind of scoping an L6 states unprompted.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§4)</b><br>
+<b>Q: Your executor fleet gets recabled and every baseline shifts 0.7%. What happens Monday?</b><br>
+A: Fleet-change events are first-class inputs: any executor-fleet mutation emits a baseline-invalidation event that freezes gating on affected series, triggers a 30-run re-baseline, and annotates dashboards so the step isn't read as a compiler event. The detector must subscribe to its own infrastructure's change feed — otherwise its first serious incident is self-inflicted.<br>
+<b>Q: A regression lands in the same week as an intentional improvement of similar size in the same series. Does changepoint detection see it?</b><br>
+A: A single series can net them out — this is why the gate compares against <em>expected</em> deltas: compiler teams register intended wins with the RC (per-benchmark expected Δ from their own runs); the gate tests observed − expected against zero. Unregistered movement in either direction fires. Improvement tracking isn't a courtesy; it's what keeps the null honest (§9).<br>
+<b>Q: Why MAD, not standard deviation?</b><br>
+A: Benchmark null distributions are contaminated: rare infra hiccups (a slow host, a retried RPC) put 5–10σ outliers in the tail at ~1% rates. Standard deviation lets a handful of those inflate the band and blind the detector; MAD ignores them, and the outliers get their own infra-health alert instead of widening every noise band.</div>
+<h2 id="s5">5 · Tiered Execution Strategy</h2>
+<div class="dia"><svg viewBox="0 0 860 280" width="860" height="280">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:12px;fill:var(--ink)}.tri{stroke:var(--muted);fill:var(--accent-soft)}</style>
+<polygon class="tri" points="430,20 250,100 610,100" opacity="0.95"/>
+<polygon class="tri" points="240,110 620,110 700,190 160,190" opacity="0.75"/>
+<polygon class="tri" points="150,200 710,200 800,260 60,260" opacity="0.55"/>
+<text class="t" x="360" y="70">T0 · smoke (nightly + every RC)</text>
+<text class="s" x="360" y="86">12 canaries × 1 platform × 1 cfg × 3 reps</text>
+<text class="t" x="330" y="140">T1 · release-qualification (per RC, blocking)</text>
+<text class="s" x="330" y="156">60 spend-weighted models × 2 platforms × 3 cfgs × 5 reps</text>
+<text class="s" x="330" y="170">≈ 2,160 gated series · verdict &lt; 24 h</text>
+<text class="t" x="300" y="228">T2 · full sweep (monthly) + hardware-qualification (per silicon)</text>
+<text class="s" x="300" y="244">all 300 models · tail rotates weekly ¼ at a time · geometry-matched + prod-shaped</text>
+<text class="s" x="640" y="60">cost: ~40 chip-h/night</text>
+<text class="s" x="700" y="150">~1,350 chip-h/RC</text>
+<text class="s" x="760" y="228">~2,300 chip-h/mo</text>
+<text class="s" x="60" y="40">detection latency:</text><text class="s" x="60" y="54">T0 &lt; 4 h</text><text class="s" x="60" y="120">T1 &lt; 24 h</text><text class="s" x="60" y="210">T2: days (not gating)</text>
+</svg></div>
+<pre>Weekly budget:  T0: 7 × 40 h              =   280 chip-h
+                T1: 1 RC × 1,350 h        = 1,350
+                T2 amortized (2,300/4)    ≈   575
+                tail rotation (75 models × 1 platform × 2 cfg × 3 reps × 15 m) ≈ 1,150
+                re-baselines + bisection reserve                              ≈ 1,100
+                total ≈ 4,455 chip-h/week ≈ 6% of the naive 72,000            ✔ §1 target</pre>
+<p><b>Long-tail sampling.</b> The 240 non-T1 models rotate through weekly quarters (every model measured monthly), <em>plus</em> HLO-fingerprint clustering: models whose serving HLO is ≥95% signature-similar to a T1 representative inherit its verdict and skip redundant chip time. Coverage is spend-weighted; the report says "95% of fleet dollars gated, 100% of models within 28 days," never "20% of models tested."</p>
+<p><b>Pruning with cost models.</b> Pre-submit static analysis (per-op roofline over the analytic bytes/FLOPs of each benchmark's HLO, per platform) marks each CL as perf-relevant or not per benchmark; nightlies skip benchmarks no CL since the last run could have touched (typical nightly: 60–80% skipped, reclaimed as bisection reserve). The same cost model provides pre-silicon estimates for §9's hardware-qualification and sanity-bounds every measured result (measured ≪ roofline prediction with no HLO change = suspect the harness first).</p>
+<div class="sig"><b>Staff signal:</b> the pyramid's budget line reconciling to the §1 target (4,455 ≈ 6% of naive) closes the loop the capacity math opened — and HLO-fingerprint inheritance is the insight that coverage is a property of <em>programs</em>, not model names: benchmarking two models that compile to the same kernels is paying twice for one answer.</div>
+
+<h2 id="s6">6 · Root-Cause Attribution</h2>
+<p>Attribution is a product with two customers: the compiler team needs <em>which CL and which pass</em>; the model team needs <em>which op, how much, and what to do meanwhile</em>. The system produces both from the same artifacts.</p>
+<h3>6.1 Automated bisection — compiler axis</h3>
+<div class="dia"><svg viewBox="0 0 860 150" width="860" height="150">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}.b{fill:var(--panel);stroke:var(--muted);rx:5}.a{stroke:var(--accent);stroke-width:1.4;marker-end:url(#ar2)}</style>
+<defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="b" x="10" y="20" width="150" height="46"/><text class="t" x="20" y="40">alert: series + nightly</text><text class="s" x="20" y="56">range = 38 CLs</text>
+<rect class="b" x="200" y="20" width="170" height="46"/><text class="t" x="210" y="40">filter: perf-relevant CLs</text><text class="s" x="210" y="56">cost-model tags → 9 CLs</text>
+<rect class="b" x="410" y="20" width="180" height="46"/><text class="t" x="420" y="40">binary search on chips</text><text class="s" x="420" y="56">⌈log₂ 9⌉ = 4 builds × 3 reps</text>
+<rect class="b" x="630" y="20" width="220" height="46"/><text class="t" x="640" y="40">culprit CL + auto-artifacts</text><text class="s" x="640" y="56">HLO diff · trace pair · roofline note</text>
+<line class="a" x1="160" y1="43" x2="200" y2="43"/><line class="a" x1="370" y1="43" x2="410" y2="43"/><line class="a" x1="590" y1="43" x2="630" y2="43"/>
+<text class="s" x="10" y="100">Each bisection step reuses the T0 harness (3 reps suffice: the effect size is now known and large relative to σ).</text>
+<text class="s" x="10" y="116">Cost: 4 builds × 3 reps × 10 min ≈ 2 chip-h + compile time — cheap because the nightly tier kept the range at one day.</text>
+<text class="s" x="10" y="132">Hardware axis: there is no bisect — you cannot binary-search between v5e and Trillium. You diff *configurations*: same HLO, same</text>
+<text class="s" x="10" y="146">config, both platforms; then ablate one axis at a time (dtype, tile geometry, batch) until the delta localizes. §9 covers the pitfalls.</text>
+</svg></div>
+<h3>6.2 Drill-down artifacts</h3>
+<p>Every T1/T0 run persists: per-op timing from the profiler (op name → µs, keyed to HLO), the serialized post-optimization HLO (so two compiler versions' <em>decisions</em> can be diffed, not just their outputs), kernel-level traces for the top-N ops, and the collective timeline (per-collective start/duration/bytes). The attribution job's first move on any alert is a <b>per-op diff</b>: join the before/after op-timing tables on HLO fingerprint, sort by Δµs — in practice this localizes 80% of regressions to a named op in minutes, before any human looks.</p>
+<h3>6.3 Worked example, end to end</h3>
+<p><b>Setup (the numbers every artifact below uses):</b> model <code>chat-8b</code>: 8.0B params, int8 weights (8 GB), 32 layers, d_model 4096, 32 Q heads / 8 KV heads × head-dim 128, int8 KV. Served on a <b>v6e-4</b> (Trillium) slice: 4 × 1.64 TB/s = 6.56 TB/s aggregate HBM BW; measured achieved fraction 0.65 → <b>4.26 TB/s</b>. Decode config: B=64, mean context s̄=2048.</p>
+<pre>Baseline decode step (per token, whole model):
+  weights streamed:  8 GB
+  KV read: 2·L·H_kv·d·s̄·B·1B = 2·32·8·128·2048·64 ≈ 8.6 GB
+  total ≈ 16.6 GB  ÷ 4.26 TB/s = 3.90 ms TPOT          → per layer ≈ 122 µs
+  per layer: GEMM block (250 MB weights → 59 µs) + fused attention (269 MB KV → 63 µs)</pre>
+<p><b>The event.</b> XLA RC 2026-06-17 raises a T1 alert: <code>chat-8b · v6e-4 · decode B=64 · TPOT p50: 3.90 → 4.22 ms (+8.2%)</code>. Same model on v5e-8: no movement. Prefill TTFT: no movement. The nightly changepoint (§4 plot) already pinned the day; the cost-model filter cut 38 CLs to 9; bisection (4 builds) lands on <code>cl/7841917</code> — "fusion: cap producer-consumer fusion VMEM footprint at 1.5 MB to prevent double-buffering spills."</p>
+<p><b>The trace comparison</b> (§7 renders both): before — one kernel <code>fusion.1423 (attention_softmax_fused)</code>, 63 µs/layer, scores never leave VMEM. After — <code>fusion.1423a (qk_scores)</code> 34 µs + <code>softmax.88</code> on the VPU 8 µs + <code>fusion.1423b (attn_v)</code> 37 µs, and a new HBM round trip: the fp32 score matrix S (B·H·s̄·4 B = 64·32·2048·4 ≈ <b>16.8 MB/layer</b>) written then re-read: 33.6 MB/layer of new traffic.</p>
+<pre>Roofline check (why decode regresses):
+  new traffic: 33.6 MB × 32 layers = 1.07 GB/step ÷ 4.26 TB/s = +252 µs  → +6.5% predicted
+  measured +8.2% (+320 µs): remainder ≈ exposed VPU softmax (8 µs × 32 = 256 µs *partially*
+  overlapped → ~60 µs exposed) + lost intra-kernel pipelining. Predicted-vs-measured gap
+  reported honestly; the roofline term is the dominant, actionable component.
+Why v5e is unaffected:  per-core score tile = lanes × s̄ × 4B → v6e (256 lanes): 2.0 MB > 1.5 MB cap → split
+                                                v5e (128 lanes): 1.0 MB < cap → stays fused
+Why prefill is unaffected: prefill attention is compute-bound (AI ≫ ridge); the added bytes
+  hide under MXU time — and flash-style prefill never materialized S to HBM anyway.</pre>
+<p><b>Remediation paths, with tradeoffs:</b> (1) <em>Compiler flag now:</em> allowlist <code>--xla_fusion_vmem_cap_exempt=attention_softmax</code> on affected models — instant, reversible, adds flag-debt that must be tracked to removal. (2) <em>Heuristic fix:</em> make the cap tile-geometry-aware (footprint ÷ lanes, not absolute bytes) — correct fix, lands next release, needs the compiler team. (3) <em>Model-side:</em> none reasonable here; reshaping heads to duck a compiler cap is backwards. Gate verdict: <b>block RC for the affected family</b>, ship with (1) as the documented exception, track (2) to closure.</p>
+<div class="dia"><svg viewBox="0 0 860 250" width="860" height="250">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}.ax{stroke:var(--muted);stroke-width:1}</style>
+<line class="ax" x1="70" y1="210" x2="830" y2="210"/><line class="ax" x1="70" y1="20" x2="70" y2="210"/>
+<text class="s" x="330" y="238">arithmetic intensity (FLOP/byte, log scale)</text>
+<text class="s" x="6" y="110" transform="rotate(-90 14 110)">attainable TF/s</text>
+<polyline fill="none" stroke="var(--muted)" stroke-width="1.6" points="70,200 470,60 830,60"/>
+<text class="s" x="700" y="52">v6e peak (bf16-class int8 path)</text>
+<line x1="470" y1="20" x2="470" y2="210" stroke="var(--muted)" stroke-dasharray="3 3"/>
+<text class="s" x="476" y="32">ridge ≈ 560 FLOP/B</text>
+<circle cx="150" cy="172" r="5" fill="var(--good)"/><text class="s" x="118" y="160" fill="var(--good)">fused decode attn (before): AI ≈ 2.4</text>
+<circle cx="118" cy="183" r="5" fill="var(--bad)"/><text class="s" x="86" y="199" fill="var(--bad)">split (after): AI ≈ 1.5 — deeper into the BW wall</text>
+<circle cx="640" cy="60" r="5" fill="var(--good)"/><text class="s" x="560" y="84" fill="var(--good)">prefill attn: AI ≈ 10³ — compute-bound,</text><text class="s" x="560" y="98" fill="var(--good)">split invisible</text>
+</svg></div>
+<div class="sig"><b>Staff signal:</b> the worked example runs the full loop — alert → per-op diff → HLO diff → roofline arithmetic that <em>quantitatively</em> explains platform- and phase-selectivity (+6.5% predicted of +8.2% measured, v5e exempt by tile math) → three remediations with owners and debts. Attribution designed as a two-customer product, and the predicted-vs-measured gap reported instead of massaged, are the L6 tells.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§6)</b><br>
+<b>Q: The culprit CL is a giant LLVM roll (10,000 upstream commits). Bisection says "the roll." Now what?</b><br>
+A: Rolls get their own inner bisection lane: we maintain the ability to build XLA at synthetic points inside a roll (upstream repo bisect driven by the same harness), budgeted separately because compile time dominates. In parallel, the per-op diff usually names the op and pass; that plus the roll's changelog often localizes without full inner bisection. If neither converges within the SLO, the gate doesn't wait: block-or-flag decides on the measured effect, and root-cause continues out of band.<br>
+<b>Q: Two CLs interact — each is neutral alone, together they regress. Bisection returns an innocent CL. How do you catch this?</b><br>
+A: Bisection verifies its verdict: after landing on CL k, it re-tests k−1 (must be clean) and k alone cherry-picked onto the pre-range base (must reproduce). Interaction cases fail that second check, which auto-escalates to a bounded pairwise search over the cost-model-flagged subset — 9 flagged CLs is 36 pairs, still cheap at 3 reps. The verification step is what keeps trust in the bisector's verdicts.<br>
+<b>Q: The regression only reproduces at B=64, and your bisection harness runs B=8 for speed. Comment.</b><br>
+A: Bisection must reproduce the <em>alerting series' exact config</em> — the alert payload carries the config hash precisely so the bisector can't "optimize" itself into a different regime. Roofline thinking says why: bottleneck-dependent regressions (this one: memory-bound only) vanish outside their regime. Any speedup in bisection comes from fewer repeats, never from changing the workload.</div>
+<h2 id="s7">7 · Trace and Log Artifacts</h2>
+<p>All artifacts share the §6.3 config: <code>chat-8b</code> (8 GB int8, 32 layers, 32Q/8KV × 128, int8 KV) on v6e-4 @ 4.26 TB/s achieved; B=64, s̄=2048; one decode layer ≈ 122 µs before, ≈ 132 µs after. Timelines show one layer window.</p>
+<div class="art"><div class="lbl">Artifact 1 — Perfetto-style timeline, BEFORE (xla @ prod): one decode layer, 122 µs</div>
+<svg viewBox="0 0 860 190" width="860" height="190">
+<style>.s{font-size:9.5px;fill:var(--muted)}.t{font-size:10px;fill:var(--ink)}.r{rx:2}.lb{font-size:10px;fill:var(--muted)}</style>
+<text class="lb" x="4" y="40">MXU</text><text class="lb" x="4" y="75">VPU</text><text class="lb" x="4" y="110">HBM/DMA</text><text class="lb" x="4" y="145">ICI</text>
+<line x1="70" y1="20" x2="70" y2="160" stroke="var(--line)"/>
+<rect class="r" x="70" y="28" width="212" height="20" fill="var(--compute,#4a7fb5)" style="fill:#4a7fb5"/><text class="t" x="76" y="42" fill="#fff">fusion.201 (qkv+out+ffn GEMMs, int8) 59 µs</text>
+<rect class="r" x="286" y="28" width="227" height="20" style="fill:#4a7fb5"/><text class="t" x="292" y="42" fill="#fff">fusion.1423 (attention_softmax_fused) 63 µs</text>
+<rect class="r" x="286" y="63" width="227" height="14" style="fill:#8a8f98"/><text class="s" x="292" y="74" fill="#fff">softmax inside fusion — VMEM only, no HBM S traffic</text>
+<rect class="r" x="70" y="98" width="212" height="20" style="fill:#7a5fa8"/><text class="t" x="76" y="112" fill="#fff">weights DMA 250 MB (overlapped)</text>
+<rect class="r" x="286" y="98" width="227" height="20" style="fill:#7a5fa8"/><text class="t" x="292" y="112" fill="#fff">KV read 269 MB (overlapped)</text>
+<rect class="r" x="518" y="133" width="60" height="16" style="fill:#c98a2e"/><text class="s" x="522" y="145" fill="#fff">ppermute 4 µs</text>
+<line x1="70" y1="160" x2="830" y2="160" stroke="var(--line)"/>
+<text class="s" x="70" y="176">0 µs</text><text class="s" x="270" y="176">59</text><text class="s" x="500" y="176">122</text><text class="s" x="620" y="176">(next layer begins)</text>
+<text class="s" x="560" y="42">→ layer total 122 µs · step = 32 × 122 ≈ 3.90 ms ✔</text>
+</svg></div>
+<div class="art"><div class="lbl">Artifact 2 — Perfetto-style timeline, AFTER (xla @ RC-2026-06-17): one decode layer, 132 µs</div>
+<svg viewBox="0 0 860 200" width="860" height="200">
+<style>.s{font-size:9.5px;fill:var(--muted)}.t{font-size:10px;fill:var(--ink)}.r{rx:2}.lb{font-size:10px;fill:var(--muted)}</style>
+<text class="lb" x="4" y="40">MXU</text><text class="lb" x="4" y="75">VPU</text><text class="lb" x="4" y="110">HBM/DMA</text><text class="lb" x="4" y="145">ICI</text>
+<line x1="70" y1="20" x2="70" y2="160" stroke="var(--line)"/>
+<rect class="r" x="70" y="28" width="205" height="20" style="fill:#4a7fb5"/><text class="t" x="76" y="42" fill="#fff">fusion.201 (GEMMs) 59 µs</text>
+<rect class="r" x="279" y="28" width="118" height="20" style="fill:#4a7fb5"/><text class="t" x="284" y="42" fill="#fff">fusion.1423a (qk_scores) 34 µs</text>
+<rect class="r" x="429" y="28" width="129" height="20" style="fill:#4a7fb5"/><text class="t" x="434" y="42" fill="#fff">fusion.1423b (attn_v) 37 µs</text>
+<rect class="r" x="399" y="63" width="28" height="16" style="fill:#8a8f98"/><text class="s" x="360" y="90">softmax.88 (VPU) 8 µs — now EXPOSED between kernels</text>
+<rect class="r" x="279" y="98" width="118" height="20" style="fill:#7a5fa8"/><text class="t" x="284" y="112" fill="#fff">KV read (part)</text>
+<rect class="r" x="399" y="98" width="30" height="20" style="fill:#d95f5f"/><text class="s" x="380" y="132" fill="var(--bad)">S write 16.8 MB (fp32) — NEW</text>
+<rect class="r" x="431" y="98" width="30" height="20" style="fill:#d95f5f"/><text class="s" x="465" y="112" fill="var(--bad)">S read 16.8 MB — NEW · +33.6 MB/layer → +7.9 µs BW + exposure ≈ +10 µs/layer</text>
+<line x1="70" y1="160" x2="830" y2="160" stroke="var(--line)"/>
+<text class="s" x="70" y="176">0 µs</text><text class="s" x="264" y="176">59</text><text class="s" x="392" y="176">93</text><text class="s" x="552" y="176">132</text>
+<text class="s" x="580" y="42">→ 32 × 132 ≈ 4.22 ms (+8.2%) ✔</text>
+</svg></div>
+<div class="art"><div class="lbl">Artifact 3 — alert payload (detector → triage queue)</div>
+<pre>{
+  "alert_id": "perfreg-2026-06-18-00412",
+  "series": {"model": "chat-8b", "hlo_fingerprint": "hlo:9f31c2…",
+             "platform": "v6e-4", "config": "decode.B64.s2048.int8", "metric": "tpot_p50_ms"},
+  "baseline": {"median": 3.90, "mad": 0.017, "n": 30, "window": "2026-05-12..06-16"},
+  "observed": {"median": 4.22, "n": 5, "release": "xla-rc-2026-06-17"},
+  "delta": {"abs_ms": 0.32, "pct": 8.2, "z_robust": 18.8, "fdr_q": 1.2e-9},
+  "effect_gate": {"mde_pct": 1.0, "passed_min_effect": true},
+  "scope": {"correlated_series": ["chat-8b/v6e-4/decode.B8: +7.4%",
+            "rank-moe-110b/v6e-16/decode: +3.1%"],
+            "clean_series": ["chat-8b/v5e-8/*", "chat-8b/*/prefill.*"]},
+  "changepoint": {"nightly": "2026-06-17", "cl_range": ["cl/7841885", "cl/7841923"], "n_cls": 38},
+  "bisection": {"status": "done", "culprit": "cl/7841917", "verified_adjacent_clean": true},
+  "artifacts": {"op_diff": "…/opdiff/00412", "hlo_diff": "…/hlodiff/00412",
+                "trace_before": "…/tr/prod/9f31c2", "trace_after": "…/tr/rc/9f31c2"},
+  "verdict": "BLOCKING", "owner_hint": "xla-fusion", "page": "ml-perf-triage"
+}</pre></div>
+<div class="art"><div class="lbl">Artifact 4 — bisection log (excerpt)</div>
+<pre>[00:07] range cl/7841885..cl/7841923 (38 CLs); cost-model filter → 9 perf-relevant
+[00:09] build xla @ cl/7841904 … TPOT 3.91 ±0.02  → CLEAN   range → (7841904, 7841923], 4 CLs
+[00:31] build xla @ cl/7841917 … TPOT 4.21 ±0.03  → REGRESSED range → (7841904, 7841917], 2 CLs
+[00:52] build xla @ cl/7841911 … TPOT 3.90 ±0.02  → CLEAN   range → (7841911, 7841917], 1 CL
+[01:13] candidate cl/7841923? no — remaining: cl/7841917 "fusion: cap producer-consumer
+        fusion VMEM footprint at 1.5MB" … wait: re-map — flagged CLs in range: {7841917}
+[01:14] verify: cl/7841916 CLEAN ✔ ; cherry-pick 7841917 on base → 4.22 REPRODUCED ✔
+[01:35] culprit = cl/7841917 (author: xla-fusion team) · confidence: verified-both-sides</pre></div>
+<div class="art"><div class="lbl">Artifact 5 — HLO diff (post-optimization, abbreviated)</div>
+<pre>--- prod   hlo:9f31c2  layer.attn
+-  %fusion.1423 = bf16[64,32,128]{...} fusion(%q, %k_cache, %v_cache),
+-      kind=kCustom, calls=%attention_softmax_fused_computation
+-      backend_config={"fusion_kind":"attention_softmax_fused","vmem_bytes":2097152}
++++ rc-2026-06-17
++  %fusion.1423a = f32[64,32,2048]{...} fusion(%q, %k_cache), kind=kLoop,
++      calls=%qk_scale_computation            // S materialized to HBM (16.8 MB, fp32)
++  %softmax.88  = f32[64,32,2048]{...} exponential-normalize(%fusion.1423a)
++  %fusion.1423b = bf16[64,32,128]{...} fusion(%softmax.88, %v_cache), kind=kLoop
++      // fusion declined: projected vmem 2,097,152 B > cap 1,572,864 B (cl/7841917)</pre></div>
+<div class="art"><div class="lbl">Consistency check — the arithmetic in one place</div>
+<pre>S bytes/layer = B·H·s̄·4 B = 64·32·2048·4 = 16,777,216 ≈ 16.8 MB   (write) + 16.8 (read)
+Δbytes/step   = 33.6 MB × 32 layers = 1.07 GB
+Δt (BW term)  = 1.07 GB ÷ 4.26 TB/s = 252 µs = +6.5% of 3.90 ms
+measured      = +320 µs (+8.2%) → residual 68 µs ≈ exposed softmax + lost pipelining
+per-layer     : 122 → 132 µs ; ×32 = 3.90 → 4.22 ms ✔ matches alert, traces, and §6 text
+v5e tile      : 128·2048·4 = 1.05 MB &lt; 1.5 MB cap → fused ✔ ; v6e: 256·2048·4 = 2.10 MB &gt; cap → split ✔</pre></div>
+
+<h2 id="s8">8 · Production Integration and Rollout Safety</h2>
+<p><b>Gating policy — severity is dollars × scope, and every threshold pre-agreed:</b></p>
+<table>
+<tr><th>Finding</th><th>Action</th></tr>
+<tr><td>≥ 3% on any top-20 series, or ≥ 1% fleet-spend-weighted aggregate</td><td><b>Blocks the release</b> for affected families; compiler team owns unblock (fix, flag, or negotiated waiver with model-team sign-off)</td></tr>
+<tr><td>1–3% on gated series</td><td>Release proceeds; <b>P1 bug</b> auto-filed with artifacts, must resolve before next RC (no compounding drift)</td></tr>
+<tr><td>Tail-model or sub-MDE movement</td><td>Tracked in the trend queue; pages nobody</td></tr>
+<tr><td>Registered, expected improvement confirmed</td><td>Logged as validated win (§9) — closes the loop with the compiler team</td></tr>
+</table>
+<p><b>Compiler canary:</b> after the gate passes, the new XLA rolls to 1–5% of replicas per model family, interleaved with baseline replicas on identical traffic slices; automated comparison of TPOT/TTFT/goodput on live traffic with sequential monitoring over 24–48 h. Canary catches what benchmarks can't: real traffic mixes, cache behavior, cross-model interference. <b>Rollback:</b> serving binaries are AOT-compiled per XLA release and both versions' artifacts are pre-staged; rollback = flip the binary pointer, minutes, no recompile storm — the compile cache for release N−1 is kept warm precisely for this.</p>
+<p><b>Org mechanics.</b> One <b>perf-triage rotation</b> (staffed by the ML-perf team, not the compiler team) owns first-touch on every page: confirm signal, attach attribution artifacts, route — compiler-owned (HLO diff shows decision change) vs model-owned (retrain/shape change) vs infra-owned (baseline/harness). Routing target: &lt; 1 h, because mis-routed perf bugs are where trust dies. Compiler team owns culprit fix; model teams own model-side mitigations; the detector team owns false-page rate as a KPI reviewed monthly. <b>Trust maintenance is explicit:</b> every page ends with a one-click "true/false regression" verdict from the triager; false-page rate &gt; budget for two consecutive months forces a threshold/noise-floor review. A gate that pages wolf gets ignored the quarter after — alert fatigue is a system-design failure, not an on-call character flaw.</p>
+<div class="sig"><b>Staff signal:</b> the gate policy separates block vs bug by pre-agreed dollar thresholds (no per-release negotiation); rollback is designed as pre-staged artifacts rather than a recompile; and the triage rotation with routed ownership + a false-page KPI treats <em>organizational trust</em> as a first-class reliability property of the system.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§8)</b><br>
+<b>Q: A blocking regression's fix needs 3 weeks, but the release carries a critical security patch. Walk me through the call.</b><br>
+A: Decouple the axes: security patches ride a hotfix lane cherry-picked onto the currently-deployed release, so perf gating never hostages security. If the org truly has one train, the gate's waiver path activates: affected model families pin release N−1 (per-family version pinning is a designed capability, not an emergency hack), everyone else takes N, and the waiver has an owner and an expiry. The design point: the gate must have a narrow, auditable bypass — otherwise the first emergency demolishes it.<br>
+<b>Q: Model teams start gaming the gate — tuning their models to the benchmark configs. Is that a failure?</b><br>
+A: Mostly it's the system working — the benchmark configs are production-derived, so optimizing for them is optimizing production. The failure mode is divergence: if teams tune for the suite while production mix drifts, goodput improves on paper only. Defenses: configs regenerate from production traces monthly (moving target), and the canary tier scores live traffic, which can't be gamed. Benchmarks set the gate; canaries audit the benchmark.<br>
+<b>Q: Who pays for the benchmark fleet, and how do you defend the budget in planning?</b><br>
+A: Central infra budget, defended with the incident ledger: chip-hours spent vs regression-dollars caught (the §1 math: one blocked 1% fleet regression pays for the year). The detector's own report card — caught/missed/false-page counts and validated-win confirmations — is published quarterly. A perf gate that can't quantify its own ROI becomes the first cost-cut casualty, and then the fleet re-learns why it existed.</div>
+
+<h2 id="s9">9 · Evolution and Hard Problems</h2>
+<p><b>10× models (3,000):</b> the per-model paradigm dies; the HLO-fingerprint clustering becomes the primary object — you gate <em>program clusters</em> (a few hundred) plus every model above a spend threshold. Auto-adoption (§3 follow-up) becomes the ingestion path, and per-op diffing must be fully automated triage, since humans can't read 3,000 series.</p>
+<p><b>Pre-silicon qualification:</b> before Ironwood-next tapes out, the suite runs on the architectural simulator / emulation farm. Fidelity limits are respected explicitly: simulators rank kernels and expose gross lowering bugs but miss DVFS, HBM refresh interference, and real collective congestion — so pre-silicon verdicts are "relative regressions vs simulated baseline," never absolute SLO claims, and first-silicon T2 re-baselines everything. The correlation report (simulated Δ vs measured Δ on the previous generation) is maintained as the simulator's own trust metric.</p>
+<p><b>Improvements as first-class:</b> a detector that only frowns trains compiler teams to fear it. Expected-win registration (§4 follow-up) plus validated-win reporting turns the same machinery into the compiler team's scoreboard — and keeps the statistics honest, because an unregistered +4% is investigated with the same energy as −4% (it's often a broken benchmark, occasionally a silent numerics change: faster-but-wrong is the worst outcome the system can bless).</p>
+<p><b>Cross-hardware comparability:</b> "model X is 1.3× faster on B than A" is only meaningful with geometry- and SLO-matched configs: same effective batch <em>per achieved-bandwidth</em>, shapes aligned (or deliberately not) to each MXU/TensorCore tile, same SLO point, stated price basis. The suite's geometry-matched stratum exists so these claims can be made honestly; the labeled production-shaped stratum exists so nobody mistakes a padding artifact for a hardware property. Publishing both numbers with the delta explained is the only defensible cross-vendor statement.</p>
+
+<h2 id="s10">10 · 60-Minute Delivery Run Sheet</h2>
+<table>
+<tr><th>Minutes</th><th>Beat</th></tr>
+<tr><td class="num">0–5</td><td>Verbatim opening: "Before architecture — three numbers. The naive matrix is 300 models × 4 platforms × 6 configs × 5 repeats × 8 releases a week ≈ 72,000 chip-hours — a pod doing nothing but benchmarking, so this is a coverage-per-chip-hour design. Second: the detector needs its own SLOs — 24 h verdict, ≤5 false pages/week, 1% detectable effect on the top-20, because 1% of fleet is ~$10M/yr. Third: two customers — compiler team needs a culprit CL, model teams need a trace and a mitigation — so attribution is a product, not a log. Now the architecture."</td></tr>
+<tr><td class="num">5–15</td><td>Whiteboard order: architecture flow (§2) → tier pyramid with the budget line reconciling to ~6% of naive (§5). State the no-chips-in-pre-submit decision aloud.</td></tr>
+<tr><td class="num">15–40</td><td>The three deep-dives, steered in this order: <b>benchmark honesty</b> (metric definitions + MFU lies + geometry-matched vs production-shaped), <b>statistics</b> (variance table → noise floors → changepoint + FDR → power formula, n derived), <b>worked attribution example</b> (draw the before/after one-layer timeline; do the 16.8 MB × 2 × 32 ÷ 4.26 TB/s = 252 µs arithmetic on the board; explain v5e/prefill selectivity via the roofline).</td></tr>
+<tr><td class="num">40–50</td><td>Production integration: gate policy table, canary + pre-staged rollback, triage rotation and the false-page KPI. This is where organizational-maturity signal lives — don't skip it for more statistics.</td></tr>
+<tr><td class="num">50–58</td><td>Closing beats: improvements-as-first-class (faster-but-wrong is the worst blessing), pre-silicon simulator fidelity honesty, cross-hardware comparability rules. Offer the 10× evolution if time remains.</td></tr>
+<tr><td class="num">58–60</td><td>Validation close: "The system's own report card — caught, missed, false pages, validated wins — is published quarterly; a gate that can't prove its ROI and its trustworthiness gets ignored, and then it doesn't matter how good the statistics were."</td></tr>
+</table>
+<p class="sub">Every number in this document traces to the §6.3/§7 config block or to a stated assumption; anything labeled an assumption (achieved-BW fraction, $/chip-hr, variance magnitudes) should be replaced by fleet measurement before any of it is quoted as fact.</p>
+</main>
