@@ -1,0 +1,186 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>torch.compile for ML Performance Engineers — Interview Primer</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--say-bg:#eef3ec;--tpu-bg:#eef0f5;--ib-bg:#f4e9e9}
+@media (prefers-color-scheme: dark){:root{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--say-bg:#1c241d;--tpu-bg:#1b1f2a;--ib-bg:#261b1b}}
+:root[data-theme="dark"]{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--say-bg:#1c241d;--tpu-bg:#1b1f2a;--ib-bg:#261b1b}
+:root[data-theme="light"]{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--say-bg:#eef3ec;--tpu-bg:#eef0f5;--ib-bg:#f4e9e9}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,sans-serif;margin:0;padding:2rem 1rem 6rem}
+main{max-width:900px;margin:0 auto}
+h1{font-size:1.65rem;line-height:1.25;margin:.2rem 0}
+h2{font-size:1.22rem;margin:2.5rem 0 .6rem;padding-top:1rem;border-top:2px solid var(--line)}
+h3{font-size:1rem;margin:1.5rem 0 .4rem}
+p{margin:.55rem 0}.sub{color:var(--muted)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--code-bg);padding:.08rem .32rem;border-radius:4px;font-size:.85em}
+pre{background:var(--code-bg);border-radius:8px;padding:.8rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5}
+pre code{background:none;padding:0}
+pre .k{color:var(--accent);font-weight:600}pre .c{color:var(--muted);font-style:italic}pre .bad{color:var(--bad)}pre .good{color:var(--good)}
+table{border-collapse:collapse;width:100%;font-size:.85rem;margin:.7rem 0}
+th{text-align:left;color:var(--muted);border-bottom:1.5px solid var(--line);padding:.3rem .6rem .3rem 0}
+td{padding:.34rem .6rem .34rem 0;border-bottom:1px solid var(--line);vertical-align:top}
+.toc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.3rem;margin:1.4rem 0;font-size:.9rem}
+.toc a{color:var(--accent);text-decoration:none}.toc ol{margin:.3rem 0;padding-left:1.3rem}
+.say{background:var(--say-bg);border-left:4px solid var(--good);border-radius:6px;padding:.65rem 1rem;margin:.9rem 0;font-size:.92rem}
+.say b:first-child{color:var(--good)}
+.tpu{background:var(--tpu-bg);border-left:4px solid var(--accent);border-radius:6px;padding:.65rem 1rem;margin:.9rem 0;font-size:.92rem}
+.tpu b:first-child{color:var(--accent)}
+.ib{background:var(--ib-bg);border-left:4px solid var(--bad);border-radius:6px;padding:.65rem 1rem;margin:.9rem 0;font-size:.92rem}
+.ib b:first-child{color:var(--bad)}
+svg{max-width:100%;height:auto;display:block;margin:.8rem auto}
+.dia{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.6rem;overflow-x:auto}
+</style>
+<main>
+<h1>torch.compile for ML Performance Engineers</h1>
+<p class="sub">Concept-level, interview-deployable. Version anchor: <b>PyTorch 2.10–2.12 era</b> (2.10 shipped Jan 2026; two-month cadence since). Material changes in the last ~2 years are flagged inline: automatic dynamic shapes maturing (2.1→), compile caching becoming production-real (FXGraph/AOTAutograd/PGO caches + portable <code>save_cache_artifacts</code>, 2.6→), regional compilation, and vLLM-style piecewise compilation becoming the serving default. Everything deeper than the marked boundaries is compiler-team territory — knowing where that line is, is itself the staff signal.</p>
+<nav class="toc"><b>Contents</b><ol>
+<li><a href="#s1">The stack in one diagram</a></li>
+<li><a href="#s2">Dynamo: bytecode capture, guards, graph breaks</a></li>
+<li><a href="#s3">Dynamic shapes — and the TPU collision</a></li>
+<li><a href="#s4">AOTAutograd in two paragraphs</a></li>
+<li><a href="#s5">Inductor at concept level</a></li>
+<li><a href="#s6">The TPU path: torch_xla, openxla, and the JAX contrast</a></li>
+<li><a href="#s7">torch.compile in production inference</a></li>
+<li><a href="#s8">Failure-mode bestiary</a></li>
+<li><a href="#s9">Interview deployment sheet</a></li>
+</ol></nav>
+
+<h2 id="s1">1 · The Stack in One Diagram</h2>
+<div class="dia"><svg viewBox="0 0 860 330" width="860" height="330">
+<style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.g{fill:var(--accent-soft);stroke:var(--accent);rx:6}.t{font-size:12px;fill:var(--ink)}.s{font-size:10px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.6;marker-end:url(#ar)}</style>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="b" x="10" y="30" width="180" height="60"/><text class="t" x="22" y="52">Python function</text><text class="s" x="22" y="68">artifact: CPython bytecode</text><text class="s" x="22" y="82">(the thing Dynamo hooks)</text>
+<rect class="g" x="240" y="30" width="180" height="60"/><text class="t" x="252" y="52">Dynamo</text><text class="s" x="252" y="68">bytecode symbolic exec +</text><text class="s" x="252" y="82">guards → artifact: FX graph</text>
+<rect class="g" x="470" y="30" width="180" height="60"/><text class="t" x="482" y="52">AOTAutograd</text><text class="s" x="482" y="68">joint fw/bw, functionalize,</text><text class="s" x="482" y="82">decompose → ATen graph</text>
+<line class="a" x1="190" y1="60" x2="240" y2="60"/><line class="a" x1="420" y1="60" x2="470" y2="60"/>
+<line class="a" x1="560" y1="90" x2="330" y2="150"/><line class="a" x1="560" y1="90" x2="700" y2="150"/>
+<rect class="b" x="180" y="150" width="300" height="70"/><text class="t" x="192" y="172">GPU/CPU backend: Inductor</text><text class="s" x="192" y="188">schedule + fuse + autotune</text><text class="s" x="192" y="202">artifact: Triton kernels / C++, cudagraph-wrapped</text>
+<rect class="b" x="550" y="150" width="300" height="70"/><text class="t" x="562" y="172">TPU backend: openxla (torch_xla)</text><text class="s" x="562" y="188">export → StableHLO → XLA compiler</text><text class="s" x="562" y="202">artifact: HLO → fused TPU executable</text>
+<rect class="b" x="180" y="250" width="300" height="50"/><text class="s" x="192" y="270">runtime: CUDA graphs replay, guard checks at entry,</text><text class="s" x="192" y="286">caches: FXGraph / AOTAutograd / Triton / PGO</text>
+<rect class="b" x="550" y="250" width="300" height="50"/><text class="s" x="562" y="270">runtime: XLA executable cache keyed by shapes,</text><text class="s" x="562" y="286">PJRT execution; recompile on new shape signature</text>
+<line class="a" x1="330" y1="220" x2="330" y2="250"/><line class="a" x1="700" y1="220" x2="700" y2="250"/>
+</svg></div>
+<p>One sentence per stage. <b>Dynamo</b> intercepts CPython bytecode execution, symbolically evaluates it, and emits an <b>FX graph</b> of tensor ops plus <b>guards</b> — runtime predicates under which that graph is valid. <b>AOTAutograd</b> traces the joint forward+backward, removes mutation (functionalization), and lowers to a normalized <b>ATen</b> op set. The <b>backend</b> turns ATen into machine-executable code: <b>Inductor</b> schedules/fuses and emits Triton (GPU) or C++/OpenMP (CPU); the <b>openxla</b> backend exports to <b>StableHLO</b> and hands the whole problem to XLA, where fusion/layout decisions belong to XLA, not PyTorch.</p>
+<div class="say"><b>Sayable — the stack in one sentence:</b> "torch.compile is three stages: Dynamo captures Python into an FX graph with guards, AOTAutograd normalizes it into a functional ATen graph (joint fw/bw for training), and a backend — Inductor→Triton on GPU, openxla→StableHLO→XLA on TPU — does fusion and codegen; almost every production pathology is attributable to exactly one of those stages."</div>
+
+<h2 id="s2">2 · Dynamo: Bytecode Capture, Guards, Graph Breaks</h2>
+<p><b>Why bytecode-level capture.</b> <code>torch.jit.trace</code> records the ops one concrete execution ran — it silently bakes in the branch taken and the shapes seen; control flow is gone. <code>torch.jit.script</code> re-parses Python into TorchScript and dies on the Python it can't express. JAX traces <em>pure functions</em> of abstract values and simply requires you to write traceable code. Dynamo takes the fourth path: hook CPython's frame evaluation (PEP 523), symbolically execute the <em>bytecode</em>, extract the tensor-op subgraph, and compile <b>as much as it can prove safe</b> — falling back to real Python for the rest. That's the design contract: arbitrary Python runs correctly; the compiled fraction determines the speedup.</p>
+<p><b>Guards, conceptually.</b> A captured graph is a claim: "this graph is what your code does, <em>provided</em> these predicates hold" — tensor dtypes/devices/shape-classes, branch-relevant Python values, module identity. Guards are checked on every entry to the compiled function; pass → run compiled artifact, fail → recompile (new specialization) or fall back. Guards are the price of capturing an untyped dynamic language soundly: JAX doesn't need them because it forbids the things guards check for.</p>
+<p><b>Graph breaks.</b> When Dynamo hits something it can't soundly trace — data-dependent control flow on tensor <em>values</em> (<code>if x.max() &gt; 0:</code>), calls into opaque code (NumPy on tensor data, arbitrary C extensions, <code>print(tensor)</code>), side effects it can't functionalize — it ends the current graph, runs the offending code in eager Python, and starts a new graph after. The cost is structural, not just overhead: each fragment is a separate compile unit, so <b>fusion cannot cross the break</b>, cudagraph capture is defeated (the eager region re-introduces per-launch CPU work), and guard checks multiply per fragment. One break in a decode inner loop can cost more than Inductor's fusion gained.</p>
+<div class="dia"><svg viewBox="0 0 860 170" width="860" height="170">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}.r{rx:3}</style>
+<text class="t" x="10" y="28">single graph (no breaks): one launch path, fusion across the whole step, cudagraph-able</text>
+<rect class="r" x="10" y="38" width="700" height="22" fill="var(--good)" opacity="0.8"/><text class="s" x="20" y="53" fill="#fff">compiled graph #1 — whole decode step</text>
+<text class="t" x="10" y="100">two graph breaks: three fragments + eager islands — no cross-fragment fusion, no whole-step cudagraph</text>
+<rect class="r" x="10" y="110" width="220" height="22" fill="var(--good)" opacity="0.8"/><text class="s" x="20" y="125" fill="#fff">graph #1</text>
+<rect class="r" x="234" y="110" width="70" height="22" fill="var(--bad)" opacity="0.85"/><text class="s" x="240" y="125" fill="#fff">eager</text>
+<rect class="r" x="308" y="110" width="200" height="22" fill="var(--good)" opacity="0.8"/><text class="s" x="318" y="125" fill="#fff">graph #2</text>
+<rect class="r" x="512" y="110" width="70" height="22" fill="var(--bad)" opacity="0.85"/><text class="s" x="518" y="125" fill="#fff">eager</text>
+<rect class="r" x="586" y="110" width="160" height="22" fill="var(--good)" opacity="0.8"/><text class="s" x="596" y="125" fill="#fff">graph #3</text>
+<text class="s" x="10" y="155">each boundary: guard re-checks + Python dispatch + lost fusion; per-token loops amplify all three</text>
+</svg></div>
+<p><b>A realistic break and its fix</b> (the classic: a Python-value decision on tensor data in the hot path):</p>
+<pre><code><span class="c"># BREAKS: .item() pulls a value to Python → data-dependent branch → graph break every step</span>
+<span class="bad">max_len = (input_ids != pad_id).sum(-1).max().item()
+if max_len &lt; 512:
+    logits = model(input_ids[:, :max_len])</span>
+
+<span class="c"># FIXED: keep the decision out of the compiled region — bucket outside, compile per bucket</span>
+<span class="good">bucket = select_bucket(seq_lens)          # plain Python, outside compiled fn
+logits = compiled_fns[bucket](input_ids)  # branch-free tensor code inside</span></code></pre>
+<p><b>Finding breaks:</b> <code>torch._dynamo.explain(fn)(args)</code> reports every break with its reason and source line; <code>TORCH_LOGS=graph_breaks,recompiles</code> streams them in production runs; <code>torch.compile(fullgraph=True)</code> turns any break into a hard error — the correct setting for serving code, where a silent break is a silent performance cliff.</p>
+<div class="ib"><b>Internals boundary:</b> how Dynamo models Python frames/variables (VariableTracker), guard implementation and its dispatch cost accounting, and bytecode reconstruction are contributor territory. What a perf engineer needs: what guards assert, what breaks graphs, that <code>fullgraph=True</code> is the serving contract, and the three diagnosis commands above.</div>
+<div class="say"><b>Sayable — the graph-break cliff:</b> "A graph break isn't overhead, it's structural: fusion and cudagraphs can't cross it, so one <code>.item()</code> in a decode loop can cost more than all of Inductor's fusion gains; in serving we run <code>fullgraph=True</code> so breaks are build failures, not latency regressions."</div>
+<h2 id="s3">3 · Dynamic Shapes — and the TPU Collision</h2>
+<p><b>The mechanism.</b> First compile specializes on the exact shapes seen. When a dimension changes on a later call, Dynamo (since 2.1, "automatic dynamic") recompiles that dimension as <b>symbolic</b> (a SymInt) rather than concrete — the graph then serves a family of shapes, with guards reduced to range/divisibility constraints. Dimensions get <em>re-specialized</em> anyway when the code forces it: a value used in Python control flow, a reshape whose arithmetic needs a concrete value, or an op whose lowering wants divisibility (e.g., a kernel that requires <code>s % 128 == 0</code> will guard on it). <code>torch._dynamo.mark_dynamic(t, dim)</code> declares intent up front and skips the specialize-first-then-generalize dance; the PGO cache (2.6+) persists these dynamism decisions across restarts so the dance isn't repeated per process.</p>
+<p><b>Recompilation storms.</b> Symptom: throughput craters intermittently while the process "works"; every new (batch, seq-len) signature pays seconds-to-minutes of compile. Diagnosis: <code>TORCH_LOGS=recompiles</code> prints each recompile <em>with the guard that failed</em> — the single most useful log line in the stack; <code>torch._dynamo.config.cache_size_limit</code> (default 8 entries per code object) is the tripwire: exceeding it silently falls back to eager, converting a compile-time problem into a permanent 2× eager tax. Fix order: mark the honest dynamic dims → bucket the rest → raise the cache limit only when the shape set is finite and known.</p>
+<div class="dia"><svg viewBox="0 0 860 150" width="860" height="150">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}.r{rx:3}</style>
+<text class="t" x="10" y="20">naive: every new sequence length = a new compile (seconds each) — the storm</text>
+<rect class="r" x="10" y="28" width="55" height="18" fill="var(--bad)" opacity="0.85"/><text class="s" x="14" y="41" fill="#fff">s=137</text>
+<rect class="r" x="69" y="28" width="55" height="18" fill="var(--bad)" opacity="0.85"/><text class="s" x="73" y="41" fill="#fff">s=201</text>
+<rect class="r" x="128" y="28" width="55" height="18" fill="var(--bad)" opacity="0.85"/><text class="s" x="132" y="41" fill="#fff">s=93</text>
+<rect class="r" x="187" y="28" width="55" height="18" fill="var(--bad)" opacity="0.85"/><text class="s" x="191" y="41" fill="#fff">s=412…</text>
+<text class="s" x="260" y="41">→ cache_size_limit hit → silent eager fallback</text>
+<text class="t" x="10" y="80">production: pre-compiled bucket set — new lengths pad up to an existing artifact; zero runtime compiles</text>
+<rect class="r" x="10" y="90" width="120" height="18" fill="var(--good)" opacity="0.8"/><text class="s" x="18" y="103" fill="#fff">bucket s≤512</text>
+<rect class="r" x="134" y="90" width="120" height="18" fill="var(--good)" opacity="0.8"/><text class="s" x="142" y="103" fill="#fff">bucket s≤1024</text>
+<rect class="r" x="258" y="90" width="120" height="18" fill="var(--good)" opacity="0.8"/><text class="s" x="266" y="103" fill="#fff">bucket s≤2048</text>
+<rect class="r" x="382" y="90" width="120" height="18" fill="var(--good)" opacity="0.8"/><text class="s" x="390" y="103" fill="#fff">bucket s≤4096</text>
+<text class="s" x="514" y="103">compiled at warm-up; request pads to next bucket (bounded waste ≤ ~2×, typically ~15–30%)</text>
+<text class="s" x="10" y="135">the tradeoff is explicit: padded-token waste (bytes/FLOPs on pad) vs recompile latency and cache blowup — serving always buys the padding</text>
+</svg></div>
+<p><b>The serving consequence.</b> Production LLM serving does not let shapes float: engines enumerate a bucket set (batch × padded-length, plus cudagraph capture per bucket — §7), compile all of it at warm-up, and route requests by padding up. This is the same reasoning as the geometry discipline in kernel design: a bounded, known shape set converts an unbounded compile problem into a fixed warm-up cost.</p>
+<div class="tpu"><b>TPU contrast:</b> on GPU, a shape miss costs an Inductor/Triton compile — seconds, per kernel, amortizable. On TPU, XLA compiles <em>whole programs</em> ahead-of-time with static shapes baked into layout and fusion decisions; a shape miss recompiles the entire executable — tens of seconds to minutes for large models — and there is no symbolic-shape escape hatch: XLA's bounded-dynamism support is narrow, so <b>bucketing isn't an optimization on TPU, it's the programming model</b>. This is also why the pain ranking is: JAX-on-TPU (shapes static by culture, everyone buckets from day one) &lt; PyTorch-on-GPU (symbolic shapes absorb most drift) &lt; PyTorch-on-TPU (Dynamo's dynamism meets XLA's staticism — the collision zone where naive code produces per-shape multi-minute recompiles).</div>
+<div class="say"><b>Sayable — bucket precompilation:</b> "Serving engines pre-compile a bucket lattice of (batch, padded-length) shapes at warm-up and route by padding up — trading bounded pad waste, usually 15–30%, for zero runtime compiles; on TPU this isn't even a choice, because XLA recompiles the whole executable per shape signature."</div>
+
+<h2 id="s4">4 · AOTAutograd in Two Paragraphs</h2>
+<p>Training can't be compiled from the forward graph alone: autograd normally builds the backward dynamically at runtime, which would leave the backward eager and uncompiled. AOTAutograd traces forward and backward <em>ahead of time</em> as one joint graph, then partitions it into compilable fw/bw halves — choosing what to save vs recompute at the partition boundary (this is where activation-memory-vs-recompute decisions physically live, e.g. <code>min-cut</code> partitioning).</p>
+<p>Along the way it <b>functionalizes</b> — rewrites in-place mutation (<code>add_</code>, views) into pure ops — because both Inductor and XLA reason about SSA-style functional graphs, and it <b>decomposes</b> composite ops into a small normalized ATen/prims set so backends implement dozens of primitives, not thousands of ops. That's the whole concept load. <span class="s"></span></p>
+<div class="ib"><b>Internals boundary:</b> partitioner heuristics, tangent handling, and the decomposition tables are contributor territory. The interview-relevant residue: "joint capture is why compiled training exists; functionalization is why mutation-heavy code compiles poorly; the fw/bw partition is where remat lives."</div>
+
+<h2 id="s5">5 · Inductor at Concept Level</h2>
+<p>Inductor takes the ATen graph and (1) <b>schedules</b> — orders ops, picks loop structures and tilings; (2) <b>fuses</b> — merges producer/consumer elementwise/reduction chains into single kernels, and epilogues into matmuls; (3) <b>codegens</b> Triton for GPU (C++/OpenMP for CPU), calling vendor libs or generated templates for GEMMs; (4) <b>autotunes</b> — benchmarks candidate configs (block sizes, num_warps; and template-vs-cublas choices) at compile time, cached thereafter.</p>
+<p><b>Why fusion is the money.</b> Roofline logic: an unfused chain <code>x.mul(s).add(b).relu()</code> at bf16 reads and writes the full tensor per op — 3 reads + 3 writes = 6N·2 bytes of HBM for 3N FLOPs, AI ≈ 0.25 — hopelessly memory-bound; fused, it's 1 read + 1 write (2N·2 bytes) for the same FLOPs — <b>3× fewer HBM round-trips, ≈3× faster, mechanically</b>, because time = bytes ÷ bandwidth in this regime. On decode-shaped workloads almost everything outside the GEMMs is in this regime, which is why compile's win on inference is mostly "fusion killed the elementwise traffic," not "faster matmuls."</p>
+<p><b>Cudagraphs</b> (<code>mode="reduce-overhead"</code>): Inductor wraps compiled regions in CUDA graph capture/replay, collapsing thousands of per-kernel launches (~5–10 µs of CPU each) into one graph replay. Mechanism: decode steps at small batch are launch-bound — GPU idle between tiny kernels waiting on the host — and replay removes the host from the loop. Constraints follow from capture: static shapes and stable memory addresses per bucket (hence per-bucket capture in serving), no eager islands inside (a graph break defeats it).</p>
+<p><b>Inspecting output:</b> <code>TORCH_COMPILE_DEBUG=1</code> dumps per-graph directories (post-fusion IR, generated Triton in <code>output_code.py</code>); <code>TORCH_LOGS=output_code</code> streams the kernels; the generated Triton is readable and greppable — the fastest way to answer "did my ops fuse?" is to count kernels and look for your op names in one kernel vs three.</p>
+<div class="ib"><b>Internals boundary:</b> scheduler node/IR details, template systems (persistent matmuls, TMA templates), and Halide/CUTLASS-style codegen decisions are contributor territory. The perf-engineer's interface is: what fuses (and what boundary blocks it — §8), how to read <code>output_code</code>, when cudagraphs apply, and that autotuning cost is a compile-time, cacheable cost.</div>
+<div class="say"><b>Sayable — fusion mechanism:</b> "Fusion's win is arithmetic: an unfused elementwise chain pays an HBM read+write per op at AI≈0.25 — pure bandwidth; fusing three ops cuts round-trips 3× and that's the speedup, byte for byte. So I check <code>output_code</code> for kernel count before I believe any 'compile made it faster' claim."</div>
+<h2 id="s6">6 · The TPU Path: torch_xla, openxla, and the JAX Contrast</h2>
+<p>Two capture routes exist on TPU. <b>Legacy lazy-tensor tracing</b>: torch_xla tensors record ops into a lazy IR; at a barrier (<code>xm.mark_step()</code>) the accumulated graph compiles and runs. It re-traces every step (Python overhead per step) and turns any value-inspection (<code>.item()</code>, printing) into a synchronization + possible recompile. <b>The current route — <code>torch.compile(backend="openxla")</code></b>: Dynamo captures once (guards, no per-step re-trace), AOTAutograd normalizes, the graph exports to <b>StableHLO</b>, and XLA owns everything after — fusion, layout assignment, memory planning. Inductor's entire role is played by XLA; there is no Triton in the picture.</p>
+<p><b>What the engineer actually experiences differently:</b> compile times are whole-program and large (minutes for big models vs seconds/kernel for Triton) but cached per shape signature; shape constraints are absolute (§3); and debugging swaps <code>output_code.py</code> for HLO artifacts — <code>XLA_FLAGS=--xla_dump_to=/tmp/hlo</code>, then read post-optimization HLO to see fusion decisions (the same artifact class a TPU perf-regression pipeline diffs). Op coverage gaps surface as CPU fallbacks that are catastrophic on TPU (device→host→device per op) rather than merely slow.</p>
+<div class="tpu"><b>TPU contrast — why JAX is structurally smoother:</b> <code>jax.jit</code> traces <em>pure functions of abstract shapes</em>: no bytecode interception, no guards, no graph breaks — code that isn't traceable simply doesn't run, so the whole guard/break machinery has nothing to do. Dynamo exists precisely because PyTorch promises to run arbitrary imperative Python; that promise is what TPU enablement keeps paying for — every Dynamo edge case, every mutation pattern, every dynamic shape must be bridged into a compiler stack (XLA) designed around JAX's constraints. Implication for enablement work: the gap isn't kernels, it's <em>capture semantics</em> — which is why PyTorch-on-TPU efforts (incl. the vLLM TPU backend) converge on "restrict to the traceable, statically-shaped subset and lower through StableHLO," i.e., meet XLA where JAX already lives.</div>
+<div class="say"><b>Sayable — the JAX/Dynamo contrast:</b> "JAX never needs guards or graph breaks because it refuses at trace time what Dynamo must handle at runtime — jit takes pure functions of abstract shapes, period. Dynamo's complexity is the cost of PyTorch's promise to run arbitrary Python; on TPU you end up paying that cost and then adopting JAX's discipline anyway."</div>
+
+<h2 id="s7">7 · torch.compile in Production Inference</h2>
+<p><b>How vLLM-class engines actually use it.</b> Not one monolithic compile: <b>piecewise compilation</b> — the model is compiled in regions with attention (paged, custom-kernel, dynamic by nature) deliberately left <em>outside</em> the compiled/captured regions, called as a registered custom op between them. Per shape bucket: compile the pieces, then <b>capture cudagraphs per bucket</b> over the compiled regions; decode dispatch becomes bucket-select + graph replay. <b>Warm-up</b> runs the full bucket lattice before serving traffic (compile + capture + allocator steady-state). <b>Caching across restarts</b> (mature since ~2.6): FXGraph/AOTAutograd/Triton caches keyed remotely, plus portable <code>torch.compiler.save_cache_artifacts()</code> bundles shipped with the container image — turning a 20-minute cold warm-up into tens of seconds; the PGO cache additionally persists dynamism decisions. Restart cost is a fleet-availability number, so cache hit rate on warm-up is a monitored SLI, not a nicety.</p>
+<p><b>Quantization interaction.</b> Two modes: (a) compiled quant ops — int8/fp8 matmuls as ATen ops or custom ops with registered meta functions; Inductor fuses the dequant/activation epilogues around them — compile <em>helps</em>, killing the elementwise traffic quantization otherwise adds; (b) hand-written kernel suites (FP8 attention, fused MoE dispatch, MXFP4 GEMMs) where the kernel already fuses everything internally — compile's job shrinks to gluing between them, and a naive <code>torch.compile</code> over the whole model can <em>fight</em> them: decompositions splitting a pattern the kernel wanted whole, or a custom op without proper fake-tensor registration causing graph breaks around every call. The fix is registration discipline (<code>torch.library.custom_op</code> + fake impl), not abandoning compile.</p>
+<p><b>The compiler-first, custom-kernel-last procedure</b> — the decision list to say out loud:</p>
+<div class="dia"><svg viewBox="0 0 860 210" width="860" height="210">
+<style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.g{fill:var(--accent-soft);stroke:var(--accent);rx:6}.t{font-size:11px;fill:var(--ink)}.s{font-size:10px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.5;marker-end:url(#ar3)}</style>
+<defs><marker id="ar3" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="b" x="10" y="20" width="150" height="44"/><text class="t" x="20" y="38">1 · profile</text><text class="s" x="20" y="54">op is top-k by time?</text>
+<rect class="b" x="200" y="20" width="170" height="44"/><text class="t" x="210" y="38">2 · roofline placement</text><text class="s" x="210" y="54">at its ceiling already? → stop</text>
+<rect class="b" x="410" y="20" width="190" height="44"/><text class="t" x="420" y="38">3 · inspect codegen</text><text class="s" x="420" y="54">output_code / HLO: did it fuse?</text>
+<rect class="b" x="640" y="20" width="210" height="44"/><text class="t" x="650" y="38">4 · coax the compiler</text><text class="s" x="650" y="56">fix breaks, register ops, flags, layout</text>
+<rect class="g" x="410" y="120" width="270" height="52"/><text class="t" x="420" y="140">5 · only then: hand-write</text><text class="s" x="420" y="156">Triton/CuTe (GPU) · Pallas (TPU) — and now you</text><text class="s" x="420" y="168">own it across every future compiler/hw rev</text>
+<line class="a" x1="160" y1="42" x2="200" y2="42"/><line class="a" x1="370" y1="42" x2="410" y2="42"/><line class="a" x1="600" y1="42" x2="640" y2="42"/>
+<line class="a" x1="745" y1="64" x2="560" y2="120"/>
+<text class="s" x="10" y="120">gate at each step: expected win ≥ measured gap × the</text>
+<text class="s" x="10" y="134">roofline says it's achievable; else stop — most "slow op"</text>
+<text class="s" x="10" y="148">investigations end at 2 (already at ceiling) or 4 (a break</text>
+<text class="s" x="10" y="162">or missing fake-impl was the whole story)</text>
+</svg></div>
+<div class="say"><b>Sayable — the procedure:</b> "Profile → roofline-place the op → read the generated code to see if it fused → fix the capture problem if not → and only hand-write a kernel when the compiler provably can't reach a ceiling the roofline says is reachable — because a hand kernel is a permanent liability across every future compiler release and hardware generation."</div>
+
+<h2 id="s8">8 · Failure-Mode Bestiary</h2>
+<table>
+<tr><th>Pathology</th><th>Symptom</th><th>Diagnosis</th><th>Fix</th></tr>
+<tr><td>Graph-break storm</td><td>Compile "works," speedup ≈ 0; trace shows eager islands between fragments</td><td><code>torch._dynamo.explain</code>; <code>TORCH_LOGS=graph_breaks</code>; fragment count ≫ 1</td><td>Remove <code>.item()</code>/prints/NumPy from hot path; register custom ops with fake impls; <code>fullgraph=True</code> to lock it</td></tr>
+<tr><td>Recompilation storm (dynamic shapes)</td><td>Intermittent multi-second stalls; throughput sawtooth</td><td><code>TORCH_LOGS=recompiles</code> shows failing shape guards</td><td><code>mark_dynamic</code> honest dims; bucket the rest; PGO/caches to persist decisions</td></tr>
+<tr><td>Silent eager fallback</td><td>Stalls stop — and so does all speedup, permanently</td><td><code>cache_size_limit</code> exceeded in logs; kernel names revert to aten::</td><td>Shrink shape space (buckets); raise limit only for finite known sets; alert on fallback in serving</td></tr>
+<tr><td>Guard overhead at dispatch</td><td>Small-model/small-batch: latency floor dominated by per-call checks (µs-scale, matters at ms budgets)</td><td>Profiler shows time before first kernel; guard counts in <code>TORCH_LOGS=guards</code></td><td>Fewer specializations; cudagraph replay path (bypasses per-call Python); trim closure-captured Python state</td></tr>
+<tr><td>Cudagraph incompatibility</td><td><code>reduce-overhead</code> silently no-ops or errors: dynamic shapes, unstable addresses, in-capture syncs</td><td><code>TORCH_LOGS=cudagraphs</code>; capture errors name the op</td><td>Per-bucket static shapes; stable KV/weight buffers; keep sync-y ops (sampling on CPU) outside captured region</td></tr>
+<tr><td>Fusion miss at custom-op boundary</td><td>Kernel count higher than expected; elementwise ops unfused around your quant/attention op</td><td>Count kernels in <code>output_code.py</code>; op appears as opaque call splitting a chain</td><td>Proper <code>torch.library</code> registration incl. meta/fake; move epilogues inside the op or express as ATen so Inductor sees them</td></tr>
+<tr><td>Compile-time blowup</td><td>Warm-up minutes→hours; autotune dominates; CI times out</td><td>Compile-phase logs/profile (<code>TORCH_LOGS=+dynamo</code> timing, tlparse)</td><td>Cache artifacts across restarts (<code>save_cache_artifacts</code>); regional compilation (compile the repeated block once); trim autotune space</td></tr>
+<tr><td>TPU shape-specialization explosion</td><td>Each new signature = whole-program XLA recompile, minutes each; serving unusable</td><td>torch_xla metrics (<code>CompileTime</code> counters), XLA dump dir filling with executables</td><td>Strict bucket lattice; pad everything; persistent XLA compilation cache; treat any runtime compile in steady state as a paging bug</td></tr>
+</table>
+<div class="say"><b>Sayable — MFU-gap opener:</b> "When compiled-model MFU disappoints, I check in order: graph breaks (fragmented capture), recompiles (shape guards), silent eager fallback (cache limit), then fusion misses at custom-op boundaries — four log commands, ten minutes, and it's usually one of those before any kernel is to blame."</div>
+
+<h2 id="s9">9 · Interview Deployment Sheet</h2>
+<table>
+<tr><th>#</th><th>Sayable statement</th><th>Genre</th></tr>
+<tr><td>1</td><td>"torch.compile is Dynamo (bytecode→FX graph + guards) → AOTAutograd (joint fw/bw, functionalized ATen) → backend: Inductor→Triton on GPU, openxla→StableHLO→XLA on TPU. Every pathology maps to exactly one stage."</td><td>all three</td></tr>
+<tr><td>2</td><td>"Guards are the soundness contract of capturing an untyped language: predicates checked per call, recompile on miss. JAX needs none because jit only accepts pure functions of abstract shapes — Dynamo's machinery is the price of PyTorch's any-Python promise."</td><td>model-on-TPU co-design</td></tr>
+<tr><td>3</td><td>"A graph break is structural, not overhead: fusion and cudagraph capture can't cross it. One <code>.item()</code> in the decode loop can outweigh every fusion win — serving runs <code>fullgraph=True</code> so breaks fail the build."</td><td>MFU investigation</td></tr>
+<tr><td>4</td><td>"Recompilation storms diagnose in one line: <code>TORCH_LOGS=recompiles</code> names the failing guard. And the quiet killer is the cache limit — exceed it and you get permanent silent eager, which is why serving alerts on fallback."</td><td>MFU investigation</td></tr>
+<tr><td>5</td><td>"Production serving pre-compiles a (batch × padded-length) bucket lattice at warm-up and routes by padding up — bounded pad waste, typically 15–30%, bought at the price of zero steady-state compiles."</td><td>serving design</td></tr>
+<tr><td>6</td><td>"On TPU, bucketing isn't an optimization, it's the programming model: XLA compiles whole programs with static shapes, so a shape miss is a minutes-scale executable rebuild, not a seconds-scale kernel compile."</td><td>serving / TPU co-design</td></tr>
+<tr><td>7</td><td>"Fusion's value is roofline arithmetic: unfused elementwise chains run at AI≈0.25 — each op an HBM round-trip; fusing N ops divides the bytes by N in the memory-bound regime. That's why compile's inference win is mostly killed elementwise traffic, not faster GEMMs."</td><td>MFU investigation</td></tr>
+<tr><td>8</td><td>"Cudagraphs collapse thousands of ~5–10 µs launches into one replay — the fix for launch-bound small-batch decode — and their constraints (static shapes, stable addresses) are exactly why engines capture per bucket and keep paged attention outside as a custom op."</td><td>serving design</td></tr>
+<tr><td>9</td><td>"vLLM-class engines use piecewise compilation: compile the regular regions, leave dynamic attention outside as a registered custom op, capture cudagraphs per bucket, and ship compile-cache artifacts in the image so restart warm-up is seconds, not twenty minutes."</td><td>serving design</td></tr>
+<tr><td>10</td><td>"Compiler-first, custom-kernel-last: profile, roofline-place, read <code>output_code</code>/HLO for fusion, fix capture problems — and hand-write only when the compiler provably can't reach a reachable ceiling, because a hand kernel is a liability you re-own at every compiler and hardware rev."</td><td>all three</td></tr>
+</table>
+<p class="sub">Version note, honestly stated: behavior described is the 2.10–2.12 era; automatic dynamic shapes (2.1+), mature multi-level caching incl. PGO and portable artifacts (2.6+), and Python 3.14/free-threaded support (2.10) are the recent material shifts. Anything guard-implementation-level or scheduler-source-level was deliberately excluded — deeper than this document is compiler-team territory, and saying so in the room is part of the answer.</p>
+</main>
