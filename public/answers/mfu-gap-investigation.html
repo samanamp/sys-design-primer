@@ -1,0 +1,250 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MFU Gap Investigation: Expected 50%, Getting 25% — Staff Model Answer</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--sig-bg:#eef3ec;--fu-bg:#eef0f5;--art-bg:#f4efe4;--ac-bg:#eef2f4}
+@media (prefers-color-scheme: dark){:root{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--sig-bg:#1c241d;--fu-bg:#1b1f2a;--art-bg:#241f14;--ac-bg:#17222a}}
+:root[data-theme="dark"]{--bg:#16181d;--panel:#1e2128;--ink:#e6e8ec;--muted:#a9b1bd;--line:#2c313a;--accent:#e8a13c;--accent-soft:#3a2f1c;--good:#4caf7d;--bad:#d95f5f;--code-bg:#14161b;--sig-bg:#1c241d;--fu-bg:#1b1f2a;--art-bg:#241f14;--ac-bg:#17222a}
+:root[data-theme="light"]{--bg:#f7f7f5;--panel:#fff;--ink:#22252b;--muted:#5b636f;--line:#e2e2dd;--accent:#b97a1e;--accent-soft:#f4e6cf;--good:#2e7d54;--bad:#b34a4a;--code-bg:#f0efe9;--sig-bg:#eef3ec;--fu-bg:#eef0f5;--art-bg:#f4efe4;--ac-bg:#eef2f4}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,sans-serif;margin:0;padding:2rem 1rem 6rem}
+main{max-width:900px;margin:0 auto}
+h1{font-size:1.65rem;line-height:1.25;margin:.2rem 0}
+h2{font-size:1.22rem;margin:2.5rem 0 .6rem;padding-top:1rem;border-top:2px solid var(--line)}
+h3{font-size:1rem;margin:1.5rem 0 .4rem}
+p{margin:.55rem 0}.sub{color:var(--muted)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--code-bg);padding:.08rem .32rem;border-radius:4px;font-size:.85em}
+pre{background:var(--code-bg);border-radius:8px;padding:.8rem 1rem;overflow-x:auto;font-size:.79rem;line-height:1.5}
+table{border-collapse:collapse;width:100%;font-size:.84rem;margin:.7rem 0}
+th{text-align:left;color:var(--muted);border-bottom:1.5px solid var(--line);padding:.3rem .55rem .3rem 0}
+td{padding:.32rem .55rem .32rem 0;border-bottom:1px solid var(--line);vertical-align:top}
+.num{font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace;font-size:.83rem}
+.toc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem 1.3rem;margin:1.4rem 0;font-size:.9rem}
+.toc a{color:var(--accent);text-decoration:none}.toc ol{margin:.3rem 0;padding-left:1.3rem}
+.sig{background:var(--sig-bg);border-left:4px solid var(--good);border-radius:6px;padding:.65rem 1rem;margin:1rem 0;font-size:.92rem}
+.sig b:first-child{color:var(--good)}
+.fu{background:var(--fu-bg);border-left:4px solid var(--accent);border-radius:6px;padding:.65rem 1rem;margin:1rem 0;font-size:.92rem}
+.fu b.q{color:var(--accent)}
+.art{background:var(--art-bg);border:1px solid var(--line);border-radius:8px;padding:.9rem 1.1rem;margin:1rem 0}
+.art .lbl{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:.4rem}
+.ac{background:var(--ac-bg);border-left:4px solid var(--muted);border-radius:6px;padding:.6rem 1rem;margin:.9rem 0;font-size:.88rem}
+.ac b:first-child{color:var(--muted);text-transform:uppercase;font-size:.75rem;letter-spacing:.06em}
+svg{max-width:100%;height:auto;display:block;margin:.8rem auto}
+.dia{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.6rem;overflow-x:auto}
+</style>
+<main>
+<h1>MFU Gap Investigation: "Expected 50%, Getting 25%"</h1>
+<p class="sub">A staff-level model answer: solve the incident, then design the repeatable process. Hardware assumptions, flagged as such throughout: Trillium-class chip ≈ 918 TFLOP/s bf16 dense, 32 GB HBM @ 1.64 TB/s, 256-chip ICI pod; effective per-chip collective bandwidth for the patterns here assumed ~12 GB/s (a measured-once fleet prior, not a spec).</p>
+<nav class="toc"><b>Contents</b><ol>
+<li><a href="#s1">Clarifying questions and framing</a></li>
+<li><a href="#s2">First 30 minutes: interrogate the metric</a></li>
+<li><a href="#s3">The top-down decomposition (the methodology)</a></li>
+<li><a href="#s4">The worked incident: three stacked causes</a></li>
+<li><a href="#s5">Artifacts</a></li>
+<li><a href="#s6">From incident to process</a></li>
+<li><a href="#s7">Remediation option space — and when to stop</a></li>
+<li><a href="#s8">60-minute delivery run sheet</a></li>
+</ol></nav>
+
+<h2 id="s1">1 · Clarifying Questions and Framing</h2>
+<table>
+<tr><th>Question</th><th>Why it changes everything</th><th>Assumed answer</th></tr>
+<tr><td>Training or inference?</td><td>Different denominators, different pathologies, different tools</td><td><b>Training</b> (primary track); inference variant noted below</td></tr>
+<tr><td>If inference — prefill or decode MFU?</td><td>Quoting one MFU for inference is already a red flag: decode is memory-bound by design — its "low MFU" is the roofline, not a bug; MBU is the honest decode metric</td><td>n/a here, but I'd say this aloud before accepting the premise</td></tr>
+<tr><td>Dense or MoE?</td><td>MoE MFU accounting (routed vs dense-equivalent FLOPs) can move the number 10× before any engineering happens</td><td><b>Dense ~70B</b></td></tr>
+<tr><td>Hardware, topology, parallelism?</td><td>Sets the ideal-time arithmetic and the collective structure</td><td><b>256 Trillium-class chips, one ICI pod, GSPMD: DP=32 × TP=8</b>, seq 8,192, global batch 256 seqs = 2.10M tokens/step, bf16 + custom fp8 quant ops in FFN</td></tr>
+<tr><td>How was "expected 50%" derived?</td><td>Folklore vs roofline vs comparable — determines whether the gap is even real</td><td>"Comparable model got 50%" — <b>which I will audit in §2</b>, and it partially fails the audit</td></tr>
+</table>
+<p><b>Inference parallel track (one paragraph, said early to show the map):</b> for a decode workload the investigation reshapes — the metric becomes MBU and goodput-under-SLO; Level 1 collectives are ICI all-to-all/allgather in TP decode; Level 2 becomes KV-cache traffic accounting and batch-occupancy analysis; and "25% MFU" would likely be <em>correct behavior</em> at small batch. Same hierarchy, different instruments; I'll run the training track here.</p>
+<div class="ac"><b>Arithmetic check — the frame everything hangs on:</b><br>
+FLOPs/step = 6·N·D = 6 × 70e9 × 2.10e6 = <b>8.81e17</b>. Fleet peak = 256 × 918e12 = <b>2.35e17 FLOP/s</b>.<br>
+Ideal step (100% MFU) = 8.81e17 ÷ 2.35e17 = <b>3.75 s</b> → 50% MFU = 7.50 s · <b>observed 15.0 s = 25.0% MFU ✓</b><br>
+MFU(step) = 3.75/step_time. Every "MFU point" below converts through this line, so points are non-linear in seconds — the bridge chart in §4 does the conversion honestly.</div>
+<div class="sig"><b>Staff signal:</b> the two framing moves that are already L6: refusing a single "inference MFU" as a coherent quantity before investigating anything, and demanding the provenance of "expected 50%" — an expectation is a measurement with its own error bars, and auditing it is part of the incident, not an insult to whoever said it.</div>
+
+<h2 id="s2">2 · First 30 Minutes: Interrogate the Metric</h2>
+<p>Before profiling the system, profile the <em>number</em>. Concretely, in order:</p>
+<p><b>2.1 How is our MFU computed?</b> Numerator: analytic 6ND (model FLOPs from shapes) or traced FLOPs (whatever executed)? <b>It must be analytic</b> — traced FLOPs count rematerialization as useful work and silently absolve recompute overhead (a 30% remat tax vanishes from MFU computed on traced FLOPs). Attention term: with causal masking the true work is ~half the s² rectangle — if the comparable model's MFU used the halved term and ours uses full, that's ~3–4 points of phantom gap on 8K sequences before anything real. Denominator: bf16 dense peak (918), never the sparsity-inflated marketing peak, and never the fp8 peak unless <em>all</em> GEMMs run fp8 (ours are mixed — using fp8 peak would halve reported MFU dishonestly). Wall clock: steady-state step time, excluding init/compile, but <b>including</b> data stalls and amortized checkpointing — because tokens/day is what the fleet buys; a per-step MFU that excludes stalls is a vanity metric. Vocab GEMM and padding FLOPs: in the numerator only if genuinely computed and useful — pad FLOPs are not useful work.</p>
+<p><b>2.2 Triangulate before believing.</b> Three independent lenses must agree: (a) step time 15.0 s vs analytic minimum 3.75 s → 4.0× — large but coherent; (b) tokens/s/chip = 2.10e6/15.0/256 ≈ <b>547</b> vs comparable-model ≈ 1,100 → 2.0× worse ✓ consistent with 25 vs 50; (c) HBM BW utilization ≈ 38% average with a periodic near-zero dip (already a clue: compute-starved intervals, §4-iii). If lens (b) had shown parity, the incident would be an accounting bug, and it would be the second time this quarter.</p>
+<p><b>2.3 Audit the expectation.</b> Geometry comparability check against the 50%-model:</p>
+<div class="ac"><b>Arithmetic check — the expectation is ~3 points wrong on geometry alone:</b><br>
+Comparable: d_model 8,192, <b>head_dim 128</b>, d_ff 28,672 (=112×256 ✓), vocab 131,072 (=512×256 ✓). Ours: identical except <b>head_dim 96</b> (a GPU-heritage choice) and vocab 151,936 (=593.5×256 ✗).<br>
+SDPA GEMMs (QK<sup>T</sup>, AV) have inner/lane dim 96 → padded to 128 on the MXU tile: 25% of lanes compute zeros on the ~11% of FLOPs that are SDPA → ~2.7 MFU-point lower ceiling. Vocab GEMM pad waste on ~5% of FLOPs → ~0.3 pts.<br>
+<b>Corrected expectation ≈ 47%, not 50.</b> The gap to explain is 25→47; the last ~3 "missing" points were never available without a model-side geometry change. This is the §4 residual, resolved honestly at the start rather than chased at the end.</div>
+<div class="sig"><b>Staff signal:</b> interrogating the metric before the system — the remat/causal/MoE/padding accounting traps, the three-lens triangulation, and the geometry audit that <em>re-derives the expectation</em> — routinely closes 20–40% of "MFU gaps" without touching the workload. L5 opens the profiler; L6 first establishes that the number and the target are both real.</div>
+<h2 id="s3">3 · The Top-Down Decomposition</h2>
+<div class="dia"><svg viewBox="0 0 860 300" width="860" height="300">
+<style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.g{fill:var(--accent-soft);stroke:var(--accent);rx:6}.t{font-size:11.5px;fill:var(--ink)}.s{font-size:9.5px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.5;marker-end:url(#ar)}</style>
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="g" x="250" y="10" width="360" height="46"/><text class="t" x="262" y="28">L0 · Step-time accounting (xprof timeline, ≥20 steps, ≥3 hosts)</text><text class="s" x="262" y="44">descend into the LARGEST bucket first; exit when buckets sum to step ±3%</text>
+<rect class="b" x="10" y="90" width="195" height="56"/><text class="t" x="20" y="108">L1 · Communication</text><text class="s" x="20" y="124">exposed vs overlapped; per-collective</text><text class="s" x="20" y="138">matrix; accidental resharding</text>
+<rect class="b" x="225" y="90" width="195" height="56"/><text class="t" x="235" y="108">L2 · Compute efficiency</text><text class="s" x="235" y="124">per-op table → roofline placement;</text><text class="s" x="235" y="138">HLO fusion audit; MXU util per GEMM</text>
+<rect class="b" x="440" y="90" width="195" height="56"/><text class="t" x="450" y="108">L3 · Host & input</text><text class="s" x="450" y="124">infeed gaps, preprocessing,</text><text class="s" x="450" y="138">checkpoint pauses, H2D</text>
+<rect class="b" x="655" y="90" width="195" height="56"/><text class="t" x="665" y="108">L4 · Fleet/hardware</text><text class="s" x="665" y="124">stragglers, degraded ICI links,</text><text class="s" x="665" y="138">DVFS (GPU), cell heterogeneity</text>
+<line class="a" x1="330" y1="56" x2="110" y2="90"/><line class="a" x1="400" y1="56" x2="322" y2="90"/><line class="a" x1="460" y1="56" x2="537" y2="90"/><line class="a" x1="530" y1="56" x2="750" y2="90"/>
+<rect class="b" x="10" y="180" width="840" height="105"/><text class="t" x="22" y="200">Decision rules (what makes this a hierarchy, not a checklist)</text>
+<text class="s" x="22" y="220">· Descend only into buckets ≥ 2 MFU points; everything smaller goes to a parking list — chasing 0.5-point buckets before 8-point buckets is the classic junior failure.</text>
+<text class="s" x="22" y="236">· Each level has an exit criterion: L0 exits when time buckets reconcile to step time ±3%; L1 exits when exposed-collective seconds are attributed per collective with a fix owner;</text>
+<text class="s" x="22" y="252">  L2 exits when top-10 ops have roofline verdicts and fusion audit is done; L3/L4 exit on strip-chart periodicity and per-host/per-chip variance verdicts.</text>
+<text class="s" x="22" y="268">· Fix order after diagnosis: cheapest-confirmation-first when causes might interact (flags/env in hours), biggest-lever-first once independence is established. Stated, not vibed.</text>
+</svg></div>
+<p><b>L0 — time accounting</b> (tool: xprof/Perfetto pod-level timeline; artifact: bucketed step decomposition). Incident numbers: MXU-busy 60% (9.0 s — but §L2 will show a third of it is waste), exposed ICI 24% (3.6 s), infeed/host gaps 10% (1.5 s amortized — visible as periodic, not per-step), framework/gaps 6% (0.9 s). Buckets sum to 15.0 s ✓ — L0 exits.</p>
+<p><b>L1 — communication</b> (artifact: per-collective matrix — name, bytes, count/step, wire-time, exposed-time). Findings pattern: (i) exposed ≫ wire-time → scheduling/serialization, not bandwidth; (ii) a collective that shouldn't exist → accidental resharding from a sharding-annotation mismatch (grep the HLO for <code>all-gather</code> ops whose operand sharding differs only by a transposed mesh axis); (iii) DCN hops appearing in what should be an ICI-only job → placement bug, 10× cost. Incident finding: grad reduce-scatter/all-gather chain wire-time ≈ 2.9 s <em>should</em> hide under 7+ s of backward but runs 3.6 s exposed — every collective queued after a <code>CustomCall</code> the fp8 quant library marks as a scheduling barrier. That's a one-line fix pattern with a 3.6 s payoff.</p>
+<p><b>L2 — compute efficiency</b> (artifacts: per-op top-k table with achieved TFLOP/s and AI; post-optimization HLO fusion audit). Findings pattern: GEMMs at 25–40% of peak → shape/padding (check dims mod 256); duplicate forward kernels inside backward → rematerialization policy surprises; elementwise chains unfused across a custom-op boundary → HBM round-trips. Incident findings: SDPA GEMMs at 34% (head_dim 96 padding — the §2 expectation issue, model-side, parked) and <b>the FFN forward kernels appearing twice in backward</b>: the quant CustomCall is opaque to the remat policy, so XLA recomputes the entire FFN block instead of the cheap ops — +29% executed FLOPs ≈ 2.0 s at achieved rate.</p>
+<p><b>L3 — host & input</b> (artifact: step-time strip chart + host CPU/infeed profile). Incident finding: every 20th step stalls ~21 s → amortized 1.04 s/step: synchronous checkpoint serialization (12 s) + input-shard refill without prefetch (9 s). Periodicity in the strip chart is the tell — mean step time hides it, p95 screams it.</p>
+<p><b>L4 — fleet/hardware</b> (artifact: per-chip step-time distribution, per-link ICI counters). Incident finding: clean — per-chip spread 1.8% (TPU determinism doing its job). On the GPU fleet this level is louder: DVFS spread 5–8% under thermal load, one throttling straggler gates every synchronous step.</p>
+<div class="sig"><b>Staff signal:</b> the hierarchy's power is its <em>decision rules</em> — descend by bucket size, per-level exit criteria, parking list for sub-2-point items — which make it teachable and repeatable by an L4, which is precisely the point of part (b) of the question. Naming the "collective that shouldn't exist" and "forward kernels twice in backward" patterns shows the artifacts have actually been read before.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§3)</b><br>
+<b>Q: How does this hierarchy change on the GPU fleet?</b><br>
+A: Structure identical, instruments and priors shift: L0 runs on nsys/Kineto instead of xprof; L1 swaps ICI for NCCL over NVLink/IB — add NCCL_DEBUG and per-ring analysis, and watch for rail-misrouted traffic; L2 adds kernel-launch overhead and CUDA-graph coverage as first-class buckets (µs launches × thousands matter at small per-GPU work), and cuBLAS heuristic misses replace XLA fusion audits; L4 gets much louder — lock clocks before trusting any number, since DVFS alone can manufacture a 5% "regression." TPU's determinism means n=3 repeats suffice where GPU wants n=10.<br>
+<b>Q: What if the profiler perturbs the workload?</b><br>
+A: Measure the observer: step time with and without profiling — xprof tracing overhead is typically &lt;2% but host-side instrumentation can serialize the input pipeline and manufacture the very stall you're chasing. Rules: capture short windows (20–50 steps) not whole runs; confirm any profiler-discovered stall reproduces in unprofiled step-time telemetry (the strip chart comes from lightweight always-on timers, not traces); and never enable per-op host callbacks in the measurement run. If a pathology appears only under profiling, treat the profiler as the suspect.<br>
+<b>Q: The gap only appears at 4× scale (1,024 chips). Your 256-chip investigation finds nothing. Now what?</b><br>
+A: The differential is the tool: run the hierarchy at both scales and diff the L0 buckets — scale-dependent gaps live almost exclusively in L1 (collective latency terms that grow with participant count, DCN crossings appearing past one pod, load-imbalance amplification: a 2% straggler is invisible at 256 and gates every step at 1,024) or L3 (input service shared across more hosts). Reproduce at the smallest failing scale to iterate cheaply — bisect the <em>scale axis</em> (256→512→768) like a commit range, and instrument per-participant collective arrival times to catch the straggler class directly.</div>
+
+<h2 id="s4">4 · The Worked Incident — Three Stacked Causes</h2>
+<p>Order of fixes: <b>cheapest-confirmation-first</b>, because causes (i) and (ii) both involve the quant library and might interact — a flag flip that confirms (i) in an hour de-risks the attribution of everything downstream. Then (ii), then (iii) — which is independent and schedulable in parallel by the data-infra owner.</p>
+<table>
+<tr><th>#</th><th>Cause</th><th>Found at</th><th>Fix</th><th>Step time</th><th>MFU</th></tr>
+<tr><td>—</td><td>baseline</td><td>—</td><td>—</td><td class="num">15.00 s</td><td class="num">25.0%</td></tr>
+<tr><td>i</td><td>Collectives serialized behind quant-library CustomCall barrier → 3.6 s exposed ICI</td><td>L1 (collective matrix: exposed ≫ wire)</td><td>Library flag removes barrier semantics + scheduler reorder; collectives overlap backward</td><td class="num">11.36 s</td><td class="num">33.0% (+8.0)</td></tr>
+<tr><td>ii</td><td>Quant op opaque to remat policy → full FFN recompute in backward, +29% executed FLOPs</td><td>L2 (fwd kernels ×2 in bwd; HLO remat cluster)</td><td>Register op as remat-transparent (pure, cheap-to-save); policy saves quant scales, recomputes only elementwise</td><td class="num">9.37 s</td><td class="num">40.1% (+7.1)</td></tr>
+<tr><td>iii</td><td>Every-20th-step stall: sync checkpoint (12 s) + shard refill (9 s) ≈ 1.04 s/step amortized</td><td>L3 (strip chart periodicity)</td><td>Async multi-tier checkpointing + double-buffered shard prefetch</td><td class="num">8.33 s</td><td class="num">45.0% (+4.9)</td></tr>
+<tr><td>—</td><td>Residual: head_dim-96 padding (~2.7 pts, model-side, next revision) + framework floor (~2.3 pts)</td><td>§2 audit + L0 remainder</td><td>Accepted; expectation corrected to ~47%</td><td class="num">—</td><td class="num">45.0 vs 47 corrected target</td></tr>
+</table>
+<div class="dia"><svg viewBox="0 0 860 240" width="860" height="240">
+<style>.s{font-size:10px;fill:var(--muted)}.t{font-size:11px;fill:var(--ink)}.bx{rx:2}</style>
+<line x1="60" y1="200" x2="840" y2="200" stroke="var(--muted)"/>
+<text class="s" x="10" y="60">MFU %</text>
+<rect class="bx" x="80" y="105" width="90" height="95" fill="var(--bad)" opacity="0.75"/><text class="t" x="92" y="98">25.0</text><text class="s" x="84" y="216">baseline</text>
+<rect class="bx" x="220" y="75" width="90" height="30" fill="var(--good)" opacity="0.8"/><rect class="bx" x="220" y="105" width="90" height="95" fill="var(--line)"/><text class="t" x="228" y="68">+8.0 → 33.0</text><text class="s" x="222" y="216">(i) overlap fix</text>
+<rect class="bx" x="360" y="48" width="90" height="27" fill="var(--good)" opacity="0.8"/><rect class="bx" x="360" y="75" width="90" height="125" fill="var(--line)"/><text class="t" x="368" y="41">+7.1 → 40.1</text><text class="s" x="362" y="216">(ii) remat fix</text>
+<rect class="bx" x="500" y="30" width="90" height="18" fill="var(--good)" opacity="0.8"/><rect class="bx" x="500" y="48" width="90" height="152" fill="var(--line)"/><text class="t" x="508" y="24">+4.9 → 45.0</text><text class="s" x="502" y="216">(iii) input fix</text>
+<rect class="bx" x="640" y="12" width="90" height="10" fill="var(--accent)" opacity="0.7"/><rect class="bx" x="640" y="22" width="90" height="178" fill="var(--line)"/><text class="t" x="640" y="8">+~2 model-side (next rev) → ~47 ceiling</text><text class="s" x="642" y="216">residual, accepted</text>
+<text class="s" x="60" y="234">MFU points are non-linear in seconds (MFU = 3.75/step): the same 1.0 s removed is worth more points at a faster baseline — why fix-(iii)'s 1.04 s buys only 4.9 points.</text>
+</svg></div>
+<div class="ac"><b>Arithmetic check — the bridge reconciles:</b><br>
+(i) 15.00 − 3.64 = 11.36 s → 3.75/11.36 = 33.0% ✓ (exposed 3.6 s → 0.4 s residual overlap tax kept in framework bucket)<br>
+(ii) executed-FLOPs inflation 1.29× on the compute bucket: compute 6.94 s → 6.94/1.29 ≈ 5.38 s? No — recompute removal deletes 2.0 s of the MXU-busy bucket directly (measured as the duplicated-kernel time): 11.36 − 1.99 = 9.37 s → 40.1% ✓ ; cross-check: 2.0 s ≈ 29% of the 6.9 s useful-compute time ✓<br>
+(iii) stall amortization: (12 + 9) s ÷ 20 steps = 1.04 s/step: 9.37 − 1.04 = 8.33 s → 3.75/8.33 = 45.0% ✓<br>
+Residual to corrected 47% target: 8.33 vs 47% ⇒ 3.75/0.47 = 7.98 s — remaining 0.35 s ≈ framework floor + imperfect overlap; the further 2.7 geometry points need head_dim 128 in the next model revision.</div>
+<div class="sig"><b>Staff signal:</b> compound causes expected and found (a 2× gap is almost never one villain); fix order justified by interaction risk, not habit; the bridge chart honestly non-linear (points-per-second changes as the baseline improves — most candidates get this wrong); and the residual <em>reconciled against a corrected expectation</em> instead of hand-waved. The measured-recovery column is what makes this an engineering narrative rather than a theory.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§4)</b><br>
+<b>Q: Your fix (i) is a flag in someone else's library. They say the barrier is load-bearing for correctness. Now what?</b><br>
+A: Then the 3.6 s is a design cost, not a bug — and the conversation moves to <em>why</em>: if the barrier guards a host-side scale readback, the fix is keeping scales on-device (which fix (ii) partially does); if it guards genuine ordering, we ask for a scoped fence (barrier only against the quant stream, not all collectives). Meanwhile the scheduler can hoist independent collectives above the CustomCall — a compiler-side workaround worth a bug with the trace attached. The staff move is converting "they said no" into a precise statement of what invariant the barrier protects, because that statement usually reveals a narrower fence.<br>
+<b>Q: Fix (ii) claims +29% executed FLOPs from remat. Couldn't that just be your remat <em>policy</em> being optimal and memory forcing it?</b><br>
+A: Checkable, and I'd check it: HBM headroom during backward was 9 GB free — remat wasn't memory-forced, it was policy-blindness (the CustomCall's outputs weren't in the saveable set, so the partitioner recomputed the whole producer chain). If memory <em>had</em> been tight, the answer changes to selective remat (save the quant outputs — small — recompute the cheap elementwise) or offloading scales to host; "recompute everything" is almost never the optimal point on the memory-compute frontier, and the frontier is computable from tensor sizes.<br>
+<b>Q: Why did comparable-model history not catch the head_dim-96 issue before training started?</b><br>
+A: Because nothing forced the comparison — which is the process gap §6 closes: the pre-launch geometry checklist diffs every new model's dims against MXU/tile alignment and flags mod-256 violations with their estimated MFU cost <em>before</em> a single chip-hour is spent. This incident's ~2.7-point geometry tax was knowable from the config file alone; the review turns tribal knowledge into a gate.</div>
+<h2 id="s5">5 · Artifacts</h2>
+<p>All artifacts share the incident config. Per-layer backward window ≈ (times to scale; 80 layers dominate the step).</p>
+<div class="art"><div class="lbl">Artifact 1 — timeline BEFORE (one backward layer window, ~142 ms): exposed collective + recompute</div>
+<svg viewBox="0 0 860 185" width="860" height="185">
+<style>.s{font-size:9.5px;fill:var(--muted)}.t{font-size:10px;fill:var(--ink)}.r{rx:2}.lb{font-size:10px;fill:var(--muted)}</style>
+<text class="lb" x="4" y="40">MXU</text><text class="lb" x="4" y="75">HBM/DMA</text><text class="lb" x="4" y="110">ICI</text><text class="lb" x="4" y="145">host</text>
+<line x1="66" y1="20" x2="66" y2="160" stroke="var(--line)"/>
+<rect class="r" x="66" y="28" width="330" height="20" style="fill:#4a7fb5"/><text class="t" x="72" y="42" fill="#fff">bwd GEMMs (fusion.31xx) 62 µs·grid ≈ 66 ms</text>
+<rect class="r" x="400" y="28" width="125" height="20" style="fill:#9b7fd4"/><text class="t" x="405" y="42" fill="#fff">RECOMPUTE ffn fwd 25 ms</text>
+<rect class="r" x="66" y="63" width="459" height="14" style="fill:#8a8f98"/><text class="s" x="72" y="74" fill="#fff">activation + weight streams (overlapped)</text>
+<rect class="r" x="529" y="98" width="215" height="20" style="fill:#d95f5f"/><text class="t" x="534" y="112" fill="#fff">reduce-scatter+all-gather EXPOSED 45 ms</text>
+<text class="s" x="529" y="132">MXU idle ← barrier: quant CustomCall fences the stream</text>
+<rect class="r" x="66" y="133" width="60" height="14" style="fill:#8a8f98"/><text class="s" x="70" y="144" fill="#fff">step()</text>
+<line x1="66" y1="160" x2="830" y2="160" stroke="var(--line)"/>
+<text class="s" x="66" y="176">0</text><text class="s" x="390" y="176">66</text><text class="s" x="520" y="176">91</text><text class="s" x="740" y="176">136 ms  (×80 layers + tails ≈ 15.0 s ✓)</text>
+</svg></div>
+<div class="art"><div class="lbl">Artifact 2 — timeline AFTER (same window, ~86 ms): overlapped, no recompute</div>
+<svg viewBox="0 0 860 165" width="860" height="165">
+<style>.s{font-size:9.5px;fill:var(--muted)}.t{font-size:10px;fill:var(--ink)}.r{rx:2}.lb{font-size:10px;fill:var(--muted)}</style>
+<text class="lb" x="4" y="40">MXU</text><text class="lb" x="4" y="75">HBM/DMA</text><text class="lb" x="4" y="110">ICI</text>
+<line x1="66" y1="20" x2="66" y2="140" stroke="var(--line)"/>
+<rect class="r" x="66" y="28" width="330" height="20" style="fill:#4a7fb5"/><text class="t" x="72" y="42" fill="#fff">bwd GEMMs 66 ms</text>
+<rect class="r" x="400" y="28" width="95" height="20" style="fill:#4a7fb5"/><text class="t" x="405" y="42" fill="#fff">opt/misc 19 ms</text>
+<rect class="r" x="66" y="63" width="429" height="14" style="fill:#8a8f98"/><text class="s" x="72" y="74" fill="#fff">streams (overlapped)</text>
+<rect class="r" x="86" y="98" width="360" height="20" style="fill:#c98a2e"/><text class="t" x="92" y="112" fill="#fff">RS/AG OVERLAPPED under backward (wire 36 ms/layer-slice)</text>
+<line x1="66" y1="140" x2="830" y2="140" stroke="var(--line)"/>
+<text class="s" x="66" y="156">0</text><text class="s" x="390" y="156">66</text><text class="s" x="500" y="156">86 ms  (×80 + tails + amortized stalls-fixed ≈ 8.3 s ✓)</text>
+</svg></div>
+<div class="art"><div class="lbl">Artifact 3 — per-op top-10 (before; % of 15.0 s step)</div>
+<pre>op                                   time%   ach.TF/s   AI(F/B)   roofline verdict
+fusion.3120 ffn bwd GEMM (d_ff)      21.4%     498       ~1,800    compute-bound, 54% peak — layout OK, remat pressure
+fusion.3101 ffn fwd GEMM             12.9%     501       ~1,800    compute-bound, 55% peak
+RECOMPUTE fusion.3101' (dup in bwd)  13.3%     499       ~1,800    ← should not exist: remat-forced duplicate
+reduce-scatter.grad (EXPOSED)        16.1%      —         —        wire 2.9 s vs exposed 3.6 s → scheduling, not BW
+all-gather.param                      7.9%      —         —        partially exposed, same barrier
+sdpa.qk fusion.2200                   5.9%     312       ~1,100    compute-bound, 34% peak ← head_dim 96 padding
+sdpa.av fusion.2210                   5.6%     318       ~1,100    same
+vocab.gemm fusion.4001                3.1%     471        ~890     54% peak; pad waste ~0.3 MFU pt
+attn.proj fusion.2230                 4.8%     512       ~1,750    healthy
+input-stall (amortized)               6.9%      —         —        L3: periodic, see strip chart</pre></div>
+<div class="art"><div class="lbl">Artifact 4 — HLO diff: the remat miss and its fix</div>
+<pre>--- before (bwd computation, excerpt)
++  %rematerialized.ffn.fwd = bf16[8192,28672] fusion(%act_in, %w_up, %w_gate),
++      kind=kLoop, calls=%ffn_fwd_computation      // full FFN fwd re-executed in bwd
++  %custom-call.quant = (bf16[...], f32[...]) custom-call(%rematerialized.ffn.fwd),
++      custom_call_target="fp8_quant_fwd"          // opaque: outputs not in saveable set
+--- after (remat policy sees through the op)
+-  %get-tuple-element.saved_scales = f32[224] get-tuple-element(%fwd_outputs), index=7
+-  // policy: SAVE quant outputs (small: scales f32[224] + int8 acts), recompute only
+-  // elementwise epilogue; ffn fwd GEMMs are NOT re-executed
+-  attrs: {remat="transparent", pure=true, save_hint="outputs_small"}</pre></div>
+<div class="art"><div class="lbl">Artifact 5 — step-time strip chart (the L3 tell)</div>
+<svg viewBox="0 0 860 130" width="860" height="130">
+<style>.s{font-size:9.5px;fill:var(--muted)}</style>
+<line x1="50" y1="100" x2="840" y2="100" stroke="var(--muted)"/>
+<text class="s" x="6" y="40">step s</text><text class="s" x="20" y="98">14</text><text class="s" x="20" y="30">36</text>
+<polyline fill="none" stroke="var(--accent)" stroke-width="1.4" points="50,88 70,87 90,89 110,88 130,87 150,88 170,89 190,87 210,88 230,88 250,25 270,88 290,87 310,89 330,88 350,88 370,87 390,89 410,88 430,87 450,88 470,26 490,88 510,87 530,88 550,89 570,88 590,87 610,88 630,89 650,88 670,24 690,88 710,87 730,88 750,89 770,88 790,87 810,88"/>
+<text class="s" x="240" y="18">every 20th step: ~35–36 s (sync ckpt 12 s + shard refill 9 s + step 14 s)</text>
+<text class="s" x="50" y="118">mean 15.0 s hides it; p95 and the period expose it — always plot the strip, never just the mean</text>
+</svg></div>
+<div class="ac"><b>Arithmetic check — artifact consistency:</b><br>
+Layer window before: 66 (bwd GEMM) + 25 (recompute) + 45 (exposed RS/AG) ≈ 136 ms; ×80 = 10.9 s + fwd-side tails/opt 2.6 s + amortized stalls 1.04 s + framework 0.5 s ≈ 15.0 s ✓<br>
+After: 86 ms × 80 = 6.9 s + tails 0.9 s + framework 0.5 s ≈ 8.3 s ✓ · Recompute total: 25 ms × 80 = 2.0 s ✓ matches fix-(ii) · Exposed: 45 ms × 80 = 3.6 s ✓ matches fix-(i) · Wire under overlap: 36 ms × 80 = 2.9 s &lt; 6.9 s bwd compute → hides ✓</div>
+
+<h2 id="s6">6 · From Incident to Process</h2>
+<div class="dia"><svg viewBox="0 0 860 170" width="860" height="170">
+<style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.g{fill:var(--accent-soft);stroke:var(--accent);rx:6}.t{font-size:10.5px;fill:var(--ink)}.s{font-size:9.5px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.4;marker-end:url(#ar4)}</style>
+<defs><marker id="ar4" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="var(--accent)"/></marker></defs>
+<rect class="b" x="10" y="20" width="150" height="50"/><text class="t" x="18" y="38">entry: gap ≥ 5 pts vs</text><text class="t" x="18" y="52">derived expectation</text>
+<rect class="g" x="200" y="20" width="150" height="50"/><text class="t" x="208" y="38">§2 metric audit</text><text class="s" x="208" y="54">budget: 0.5 day</text>
+<rect class="g" x="390" y="20" width="150" height="50"/><text class="t" x="398" y="38">L0–L4 hierarchy</text><text class="s" x="398" y="54">budget: 2 days to attributed</text>
+<rect class="g" x="580" y="20" width="120" height="50"/><text class="t" x="588" y="38">fix loop</text><text class="s" x="588" y="54">re-measure each</text>
+<rect class="b" x="740" y="20" width="110" height="50"/><text class="t" x="748" y="38">close: report +</text><text class="t" x="748" y="52">runbook delta</text>
+<line class="a" x1="160" y1="45" x2="200" y2="45"/><line class="a" x1="350" y1="45" x2="390" y2="45"/><line class="a" x1="540" y1="45" x2="580" y2="45"/><line class="a" x1="700" y1="45" x2="740" y2="45"/>
+<rect class="b" x="10" y="95" width="840" height="60"/><text class="t" x="20" y="114">escalation boundaries</text>
+<text class="s" x="20" y="130">model-team fix: geometry, remat policy choices, input pipeline ownership · compiler bug: fusion/remat/scheduling decisions contradicting cost model (file with HLO + trace attached)</text>
+<text class="s" x="20" y="144">infra ticket: stragglers, degraded links, host contention · library owner: barrier semantics, missing remat/fake registrations — each with the artifact that proves it</text>
+</svg></div>
+<p><b>Runbook:</b> the §2 audit and L0–L4 hierarchy, verbatim, with per-level tools, exit criteria, and time budgets (audit 0.5 d; L0 attribution 1 d; full attributed decomposition 2 d; no fix begins before attribution reconciles to ±3%). Every incident ends with a one-page report in a shared corpus — searchable by pathology tag — and a runbook delta if any step was missing or wrong. The runbook is versioned and has an owner; a runbook nobody updates is a wiki page, not a process.</p>
+<p><b>Prevention:</b> (1) <b>pre-launch perf review</b> for every new model: geometry checklist (all dims vs tile alignment, with estimated MFU cost per violation — this catches head_dim 96 at config time for free), sharding plan review against the mesh, expected-MFU <em>derived</em> from the roofline calculator + comparable-adjusted (the §2 audit run proactively), and a 30-minute 16-chip pilot profile before the 256-chip run. (2) <b>Regression gates:</b> the model enters the fleet benchmark system (the regression-detection machinery) with its derived expectation as the baseline — "expected 50%" becomes a versioned, derived artifact with error bars, never folklore. (3) <b>MFU-expectation modeling:</b> the roofline calculator is a maintained tool with per-generation machine balances; simulator estimates gate pre-silicon claims.</p>
+<p><b>Organizational design:</b> the ML-perf team owns the runbook and staffs a rotating "perf investigator" seat (also the triage rotation for the regression system — same skills, shared context). Model teams run the pre-launch review with a perf-team reviewer; findings that implicate the compiler are filed with artifacts attached and tracked in a shared queue reviewed with the compiler team biweekly — the queue's age distribution is itself a health metric. Post-incident reviews (blameless, 30 min) update the runbook; twice a year the runbook is exercised as a training drill on a synthetically broken run — the process equivalent of a fire drill, and how L4s become the people who can run this without me.</p>
+<div class="sig"><b>Staff signal:</b> part (b) answered concretely: entry/exit criteria and time budgets (a process you can't time-box is a vibe), escalation boundaries with the artifact each owner receives, expectations converted from folklore into derived versioned numbers, and a deliberate mechanism for the runbook to stay alive — including training drills. The incident was solved by an engineer; the process makes the next one solvable by whoever is on rotation.</div>
+<div class="fu"><b class="q">Interviewer follow-ups (§6)</b><br>
+<b>Q: Your pre-launch review adds friction; model teams route around it. How do you keep it real without becoming the perf police?</b><br>
+A: Make the cheap path the reviewed path: the review is 30 minutes with a tool-generated report (geometry check and roofline estimate are automated — the human discussion is only the flagged items), and it comes bundled with things teams want — a derived MFU target they won't be beaten up over, pilot-slice priority, and a named perf contact. Enforcement is economic, not procedural: unreviewed models get no derived expectation, which means any later gap investigation starts with the 0.5-day audit charged to their timeline. Teams route around police; they queue for services.<br>
+<b>Q: How do findings actually change the compiler, versus dying in a bug queue?</b><br>
+A: Three mechanisms: every filed bug carries a reproducing HLO + trace + estimated fleet cost in chip-hours (a bug with a dollar number gets triaged differently); the biweekly review is co-owned with a compiler-team TL who commits the queue to their planning, not ours; and patterns that recur ≥3× get promoted from bugs to "heuristic gap" documents that propose the fix shape (like tile-aware fusion caps). The leverage claim to make explicitly: one heuristic fix at the compiler layer is worth N model-team workarounds, so the queue is the highest-ROI artifact the process produces.<br>
+<b>Q: What does this process cost, and what's its ROI?</b><br>
+A: Standing cost ≈ one rotation seat plus ~2–4 engineer-weeks per major incident, plus pilot chip-hours (~1% of a training run's budget). Return, from this incident alone: 15.0→8.33 s on a 256-chip run is 44% fewer chip-hours for the same tokens — on a 30-day run that's ~3,400 chip-days recovered, order $1M-scale at internal costs, from roughly three engineer-weeks. The pre-launch review's ROI is better still since it moves the same fixes to before the burn. I'd track exactly this ledger quarterly, because a process that can't state its ROI is the first thing cut.</div>
+
+<h2 id="s7">7 · Remediation Option Space — and When to Stop</h2>
+<table>
+<tr><th>Rung (cost ↑)</th><th>Levers</th><th>When</th></tr>
+<tr><td>Config / flags (hours)</td><td>sharding specs & <code>with_sharding_constraint</code>, overlap scheduling flags, collective bucket sizes, checkpoint cadence/async, input prefetch depth</td><td>Always first; also the cheapest <em>confirmation</em> instrument for hypotheses</td></tr>
+<tr><td>Compiler-level (days)</td><td>layout annotations, fusion/remat hints, XLA flags; file heuristic bugs with repro HLO when the compiler's choice contradicts its own cost model</td><td>When the artifact shows a decision the compiler could make better generally — fix the class, not the instance</td></tr>
+<tr><td>Model-side (weeks, next revision)</td><td>geometry to tile alignment (head_dim 96→128), remat/checkpointing policy, precision plan, sequence/batch shape</td><td>When physics says the ceiling moves; costs a quality re-validation, so it rides model-revision trains</td></tr>
+<tr><td>Custom kernels — last resort (weeks + forever)</td><td>Pallas (TPU) / Triton-CuTe (GPU) for ops the compiler provably can't schedule to the roofline</td><td>Only with: profile evidence, roofline headroom proven reachable, and an owner signed up for per-generation maintenance — a hand kernel is a liability re-owned at every compiler and hardware rev</td></tr>
+</table>
+<p><b>Stopping rule, stated as arithmetic:</b> stop when the next point's cost exceeds its value — here, after 45.0%: remaining levers are a model revision (~2.7 pts, free at next train) and an SDPA Pallas kernel (~1 pt, ~3 engineer-weeks + maintenance). One MFU point on this run ≈ 75 chip-days/month; three engineer-weeks of a perf engineer buys more than that <em>elsewhere in the fleet</em> — the marginal comparison is against the best alternative use of the same engineer, not against zero. Park it, write it down, move the rotation to the next incident.</p>
+
+<h2 id="s8">8 · 60-Minute Delivery Run Sheet</h2>
+<table>
+<tr><th>Min</th><th>Beat</th></tr>
+<tr><td class="num">0–5</td><td>Verbatim: "Two answers owed: fix this model, and build the process. First, three framing moves — training or inference, because a single 'inference MFU' is already suspicious — decode is memory-bound by design and MBU is its honest metric; assume training, dense 70B, 256 chips, DP×TP. Second: audit the metric and the expectation before the system — analytic-FLOPs numerator, bf16 dense denominator, stalls included, and I'll show the expectation itself is ~3 points wrong on geometry. Third: the ideal-step arithmetic — 6·70e9·2.1e6 over 256×918 TF is 3.75 s; we're at 15, so 25%, and every hypothesis must cash out in seconds against that line."</td></tr>
+<tr><td class="num">5–15</td><td>Whiteboard 1: the L0–L4 hierarchy with decision rules (descend by bucket size, exit criteria). Say the L0 split for the incident: 60/24/10/6.</td></tr>
+<tr><td class="num">15–38</td><td>The worked decomposition, in fix order, doing the arithmetic aloud: exposed-collective (wire 2.9 vs exposed 3.6 → scheduling), remat duplicate (+29% FLOPs, 9 GB free = policy not memory), strip-chart stalls (21 s / 20 steps). Draw the bridge chart; flag the non-linearity of points-in-seconds.</td></tr>
+<tr><td class="num">38–48</td><td>Process half: runbook (budgets, exits, escalation), pre-launch review (geometry checklist catches head_dim 96 at config time), derived expectations wired into the regression system, the ROI ledger.</td></tr>
+<tr><td class="num">48–56</td><td>Deep-dives to steer toward if offered: metric-accounting traps · GPU/TPU contrast (DVFS, launch overhead, NCCL, n=10 vs n=3) · when-to-stop economics.</td></tr>
+<tr><td class="num">56–60</td><td>Close: validation methodology (each fix re-measured, bridge reconciles, residual explained against a corrected target). Two questions back: "What's your current process when a model misses its expectation — and who owns the expectation?" and "How do perf findings flow into the compiler team's planning here?"</td></tr>
+</table>
+<p class="sub">Assumptions ledger: chip specs (918 TF, 1.64 TB/s) are published-order figures; effective collective bandwidth (12 GB/s/chip for this pattern), profiler overhead (&lt;2%), and all variance magnitudes are fleet priors to re-measure. Every derived number traces to the §1 arithmetic-check line or a stated per-artifact check.</p>
+</main>
