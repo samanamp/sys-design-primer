@@ -248,7 +248,7 @@ A: Benchmark null distributions are contaminated: rare infra hiccups (a slow hos
 <text class="s" x="10" y="146">config, both platforms; then ablate one axis at a time (dtype, tile geometry, batch) until the delta localizes. §9 covers the pitfalls.</text>
 </svg></div>
 <h3>6.2 Drill-down artifacts</h3>
-<p>Every T1/T0 run persists: per-op timing from the profiler (op name → µs, keyed to HLO), the serialized post-optimization HLO (so two compiler versions' <em>decisions</em> can be diffed, not just their outputs), kernel-level traces for the top-N ops, and the collective timeline (per-collective start/duration/bytes). The attribution job's first move on any alert is a <b>per-op diff</b>: join the before/after op-timing tables on HLO fingerprint, sort by Δµs — in practice this localizes 80% of regressions to a named op in minutes, before any human looks.</p>
+<p>Every T1/T0 run persists: per-op timing from the profiler (op name → µs, keyed to HLO), the serialized post-optimization HLO (so two compiler versions' <em>decisions</em> can be diffed, not just their outputs), kernel-level traces for the top-N ops, and the collective timeline (per-collective start/duration/bytes). The attribution job's first move on any alert is a <b>per-op diff</b>: join the before/after op-timing tables on HLO fingerprint, sort by Δµs — in practice this localizes 80% of regressions to a named op in minutes, before any human looks (Artifact 6 in §7 is exactly this table for the worked example).</p>
 <h3>6.3 Worked example, end to end</h3>
 <p><b>Setup (the numbers every artifact below uses):</b> model <code>chat-8b</code>: 8.0B params, int8 weights (8 GB), 32 layers, d_model 4096, 32 Q heads / 8 KV heads × head-dim 128, int8 KV. Served on a <b>v6e-4</b> (Trillium) slice: 4 × 1.64 TB/s = 6.56 TB/s aggregate HBM BW; measured achieved fraction 0.65 → <b>4.26 TB/s</b>. Decode config: B=64, mean context s̄=2048.</p>
 <pre>Baseline decode step (per token, whole model):
@@ -368,6 +368,36 @@ measured      = +320 µs (+8.2%) → residual 68 µs ≈ exposed softmax + lost 
 per-layer     : 122 → 132 µs ; ×32 = 3.90 → 4.22 ms ✔ matches alert, traces, and §6 text
 v5e tile      : 128·2048·4 = 1.05 MB &lt; 1.5 MB cap → fused ✔ ; v6e: 256·2048·4 = 2.10 MB &gt; cap → split ✔</pre></div>
 
+<div class="art"><div class="lbl">Artifact 6 — per-op timing diff (the triage first-move, §6.2): op table join, sorted by Δ</div>
+<pre>op (HLO fingerprint join)              calls   before µs/step   after µs/step      Δ µs        note
+────────────────────────────────────────────────────────────────────────────────────────────────────
+fusion.1423 (attention_softmax_fused)   32        2,016             —             −2,016      REMOVED
+fusion.1423a (qk_scores)                32          —             1,088           +1,088      NEW
+fusion.1423b (attn_v)                   32          —             1,184           +1,184      NEW
+softmax.88 (exponential-normalize)      32          —               256             +256      NEW (VPU)
+fusion.201 (qkv+out+ffn GEMMs)          32        1,888           1,890               +2      unchanged
+ppermute.77 (ICI)                       32          128             127               −1      unchanged
+──────────────────────────────────────────────────────────────────────────────────────────────
+kernel-time sum                                   4,032           4,545             +513
+wall step time                                    3,900           4,220             +320
+</pre>
+<p class="s" style="font-size:.8rem;color:var(--muted)">Reading it like an operator: the delta is entirely one op family (1423 → 1423a/b + softmax.88); everything else is noise-level. Kernel-time sum ≠ wall time on both sides — DMA and the VPU softmax partially overlap MXU work — which is why the wall Δ (+320 µs) is less than the kernel Δ (+513 µs); trusting kernel sums over wall clocks is a classic triage mistake, and the table shows why.</p></div>
+<div class="art"><div class="lbl">Artifact 7 — detector evaluation console (the statistical verdict as it prints)</div>
+<pre>[gate-eval xla-rc-2026-06-17] family=chat-8b platform=v6e-4
+  series tpot_p50/decode.B64.s2048.int8 : base med=3.900 (n=30, MAD=0.017)  rc med=4.220 (n=5)
+    mann-whitney U=150 p=6.6e-7 | BH-q(2,160 tests)=1.2e-9? -> q=4.3e-4 PASS
+    effect=+8.21% > max(MDE=1.0%, 2sigma=0.9%) PASS  ->  verdict: REGRESSED
+  series tpot_p50/decode.B8.s2048.int8  : +7.4%  q=1.1e-3  REGRESSED
+  series ttft_p50/prefill.8k            : +0.31% q=0.74    within-noise
+  series tpot_p50 @ v5e-8 (all cfgs)    : max |Δ|=0.4%     within-noise
+  family verdict: BLOCKING (2 gated series, spend-weighted impact 0.6% fleet)
+  -> page: ml-perf-triage | auto-attach: opdiff/00412, bisect job queued</pre></div>
+<div class="art"><div class="lbl">Artifact 8 — executor run-log header (the hygiene that makes n=5 mean anything)</div>
+<pre>run_id=t1-00412-r3  harness=perfbench-2.31  chipset=v6e-4/cell-mtv5-c12 (pinned set #7, unchanged 41d)
+warmup: 120s discarded (compile-cache HIT 14/14 executables; allocator steady after 38s)
+load: open-loop poisson λ=matched, trace-mix chat-8b@2026-06 (p50 6k/p95 32k), seed=00412
+env: torch_xla 2.11 / xla-rc-2026-06-17 / runtime pinned; host cpuset 0-15; icebox neighbors: none (reserved)
+sanity: roofline-predicted TPOT 2.53ms (ideal) / measured 3.91ms -> achieved-BW 0.647 (band 0.60-0.68 OK)</pre></div>
 <h2 id="s8">8 · Production Integration and Rollout Safety</h2>
 <p><b>Gating policy — severity is dollars × scope, and every threshold pre-agreed:</b></p>
 <table>
