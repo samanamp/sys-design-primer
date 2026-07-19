@@ -35,7 +35,7 @@ svg{max-width:100%;height:auto;display:block;margin:.8rem auto}
 <h1>torch.compile for ML Performance Engineers</h1>
 <p class="sub">Concept-level, interview-deployable. Version anchor: <b>PyTorch 2.10–2.12 era</b> (2.10 shipped Jan 2026; two-month cadence since). Material changes in the last ~2 years are flagged inline: automatic dynamic shapes maturing (2.1→), compile caching becoming production-real (FXGraph/AOTAutograd/PGO caches + portable <code>save_cache_artifacts</code>, 2.6→), regional compilation, and vLLM-style piecewise compilation becoming the serving default. Everything deeper than the marked boundaries is compiler-team territory — knowing where that line is, is itself the staff signal.</p>
 <nav class="toc"><b>Contents</b><ol>
-<li><a href="#s1">The stack in one diagram</a></li>
+<li><a href="#s1">The stack in one diagram</a> · <a href="#s1b">1.5 what each stage looks like</a></li>
 <li><a href="#s2">Dynamo: bytecode capture, guards, graph breaks</a></li>
 <li><a href="#s3">Dynamic shapes — and the TPU collision</a></li>
 <li><a href="#s4">AOTAutograd in two paragraphs</a></li>
@@ -64,6 +64,65 @@ svg{max-width:100%;height:auto;display:block;margin:.8rem auto}
 <p>One sentence per stage. <b>Dynamo</b> intercepts CPython bytecode execution, symbolically evaluates it, and emits an <b>FX graph</b> of tensor ops plus <b>guards</b> — runtime predicates under which that graph is valid. <b>AOTAutograd</b> traces the joint forward+backward, removes mutation (functionalization), and lowers to a normalized <b>ATen</b> op set. The <b>backend</b> turns ATen into machine-executable code: <b>Inductor</b> schedules/fuses and emits Triton (GPU) or C++/OpenMP (CPU); the <b>openxla</b> backend exports to <b>StableHLO</b> and hands the whole problem to XLA, where fusion/layout decisions belong to XLA, not PyTorch.</p>
 <div class="say"><b>Sayable — the stack in one sentence:</b> "torch.compile is three stages: Dynamo captures Python into an FX graph with guards, AOTAutograd normalizes it into a functional ATen graph (joint fw/bw for training), and a backend — Inductor→Triton on GPU, openxla→StableHLO→XLA on TPU — does fusion and codegen; almost every production pathology is attributable to exactly one of those stages."</div>
 
+<h2 id="s1b">1.5 · What Each Stage Actually Looks Like</h2>
+<p>One function traced through every artifact — this is what you see on a real screen, and quoting any one of these from memory is worth a paragraph of description:</p>
+<pre><code>def ffn_out(x, w, b):          <span class="c"># [B,4096] @ [4096,4096] + bias, relu</span>
+    return torch.relu(x @ w + b)
+cf = torch.compile(ffn_out, fullgraph=True)</code></pre>
+<p><b>Stage 0 — what Dynamo hooks (CPython bytecode, <code>dis.dis(ffn_out)</code>):</b></p>
+<pre><code>  2   LOAD_FAST     x        LOAD_FAST     w
+      BINARY_OP     @ (MATMUL)
+      LOAD_FAST     b        BINARY_OP     + (ADD)
+      LOAD_GLOBAL   torch    LOAD_ATTR     relu
+      CALL          1        RETURN_VALUE</code></pre>
+<p><b>Stage 1 — Dynamo's FX graph (<code>TORCH_LOGS=graph_code</code>):</b></p>
+<pre><code>def forward(self, L_x_: "bf16[8, 4096]", L_w_: "bf16[4096, 4096]", L_b_: "bf16[4096]"):
+    matmul: "bf16[8, 4096]" = L_x_ @ L_w_
+    add:    "bf16[8, 4096]" = matmul + L_b_;  matmul = None
+    relu:   "bf16[8, 4096]" = torch.relu(add);  add = None
+    return (relu,)</code></pre>
+<p><b>…and the guards that make it valid (<code>TORCH_LOGS=guards</code>, excerpt):</b></p>
+<pre><code>TENSOR_MATCH: check_tensor(L['x'], Tensor, DispatchKeySet(CUDA, BFloat16),
+              torch.bfloat16, device=0, requires_grad=False,
+              size=[8, 4096], stride=[4096, 1])     <span class="c"># ← batch dim 8 is SPECIALIZED (first call)</span>
+TENSOR_MATCH: check_tensor(L['w'], …, size=[4096, 4096], …)
+ID_MATCH:     ___check_obj_id(G['torch'], 0x7f2…)   <span class="c"># torch itself hasn't been monkeypatched</span></code></pre>
+<p class="sub">Second call with batch 16 → this guard fails → recompile with <code>size=[s0, 4096]</code>: that size going symbolic in the log IS automatic dynamic shapes happening.</p>
+<p><b>Stage 2 — AOTAutograd's ATen graph (<code>TORCH_LOGS=aot_graphs</code>, inference path):</b></p>
+<pre><code>def forward(self, arg0_1: "bf16[8, 4096]", arg1_1: "bf16[4096, 4096]", arg2_1: "bf16[4096]"):
+    mm:      "bf16[8, 4096]" = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    add:     "bf16[8, 4096]" = torch.ops.aten.add.Tensor(mm, arg2_1)
+    relu:    "bf16[8, 4096]" = torch.ops.aten.relu.default(add)
+    return (relu,)</code></pre>
+<p class="sub">Everything is now namespaced <code>aten.*</code>, functional, and (in training) would carry the backward: <code>threshold_backward</code> + two transposed <code>mm</code>s in the same joint graph.</p>
+<p><b>Stage 3a — GPU: Inductor's generated Triton (<code>TORCH_COMPILE_DEBUG=1</code> → <code>output_code.py</code>, abbreviated):</b></p>
+<pre><code>@triton.jit
+def triton_poi_fused_add_relu_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    x0 = xindex % 4096
+    tmp0 = tl.load(in_ptr0 + xindex)          <span class="c"># mm result</span>
+    tmp1 = tl.load(in_ptr1 + x0)              <span class="c"># bias (broadcast)</span>
+    tmp2 = tmp0 + tmp1
+    tmp3 = triton_helpers.maximum(0, tmp2)    <span class="c"># relu — fused into the SAME kernel</span>
+    tl.store(out_ptr0 + xindex, tmp3)
+<span class="c"># call site: extern_kernels.mm(arg0_1, arg1_1, out=buf0)   ← GEMM stays cuBLAS
+#            triton_poi_fused_add_relu_0.run(buf0, arg2_1, buf1, 32768)</span></code></pre>
+<p class="sub">The reading that matters: <b>kernel name says what fused</b> (<code>fused_add_relu</code> — one kernel, one HBM round-trip for both ops) and the GEMM went to cuBLAS, not Triton. If you saw <code>fused_add_0</code> and a separate <code>fused_relu_1</code>, fusion missed — that grep is the whole §5 inspection method.</p>
+<p><b>Stage 3b — TPU: the StableHLO/XLA artifact (<code>XLA_FLAGS=--xla_dump_to=…</code>, post-optimization excerpt):</b></p>
+<pre><code>HloModule ffn_out, entry_computation_layout={(bf16[8,4096]{1,0}, bf16[4096,4096]{1,0}, bf16[4096]{0})->bf16[8,4096]{1,0}}
+
+%fused_computation (p0: bf16[8,4096], p1: bf16[4096]) -> bf16[8,4096] {
+  %broadcast = bf16[8,4096] broadcast(bf16[4096] %p1), dimensions={1}
+  %add = bf16[8,4096] add(bf16[8,4096] %p0, %broadcast)
+  ROOT %maximum = bf16[8,4096] maximum(%add, bf16[] constant(0))
+}
+ENTRY %main {
+  %dot = bf16[8,4096] dot(%x, %w), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  ROOT %fusion = bf16[8,4096] fusion(%dot, %b), kind=kLoop, calls=%fused_computation
+}</code></pre>
+<p class="sub">Same story, XLA's dialect: <code>dot</code> stays a dot, <code>add+maximum</code> became a <code>fusion(kind=kLoop)</code>. This HLO text is exactly the artifact class a TPU perf pipeline diffs between compiler versions — being able to read it is the TPU-side equivalent of reading <code>output_code.py</code>.</p>
+<div class="say"><b>Sayable — the artifact tour:</b> "I can walk the artifacts: Dynamo\u2019s FX graph and its guards — where you literally watch a size go from 8 to s0 when automatic dynamic kicks in; AOTAutograd\u2019s aten graph; then either Inductor\u2019s <code>output_code.py</code>, where the kernel name <code>triton_poi_fused_add_relu</code> tells you what fused, or the XLA HLO dump, where the same ops show up as a kind=kLoop fusion. When something\u2019s slow, I read those, in that order."</div>
 <h2 id="s2">2 · Dynamo: Bytecode Capture, Guards, Graph Breaks</h2>
 <p><b>Why bytecode-level capture.</b> <code>torch.jit.trace</code> records the ops one concrete execution ran — it silently bakes in the branch taken and the shapes seen; control flow is gone. <code>torch.jit.script</code> re-parses Python into TorchScript and dies on the Python it can't express. JAX traces <em>pure functions</em> of abstract values and simply requires you to write traceable code. Dynamo takes the fourth path: hook CPython's frame evaluation (PEP 523), symbolically execute the <em>bytecode</em>, extract the tensor-op subgraph, and compile <b>as much as it can prove safe</b> — falling back to real Python for the rest. That's the design contract: arbitrary Python runs correctly; the compiled fraction determines the speedup.</p>
 <p><b>Guards, conceptually.</b> A captured graph is a claim: "this graph is what your code does, <em>provided</em> these predicates hold" — tensor dtypes/devices/shape-classes, branch-relevant Python values, module identity. Guards are checked on every entry to the compiled function; pass → run compiled artifact, fail → recompile (new specialization) or fall back. Guards are the price of capturing an untyped dynamic language soundly: JAX doesn't need them because it forbids the things guards check for.</p>
