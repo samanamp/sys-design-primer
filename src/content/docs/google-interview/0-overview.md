@@ -21,10 +21,11 @@ At least one will be ML-performance-flavored ("design a model that runs well on 
 
 Prep, in order:
 
-1. **[Optimization track](/optimization/0-overview/)** — the substrate: serving, KV cache, parallelism, quantization, TPU/XLA. The [mental-math drills](/optimization/15-mental-math-drills/) are the per-day habit; interviewers use fumbled arithmetic as a shallowness signal.
-2. **[TTFT Optimization Program](/optimization/1-ttft-optim/)** — the template for how a staff-level design answer *sounds*: measurement first, budget decomposition, sequenced plan, explicit pushback.
-3. **[Trace-reading track](/trace-reading/0-overview/)** — for the "here's a profile, what's wrong" moment inside a design round.
-4. L6 rubric, condensed from reported loops: *you* drive — propose scope, do the estimates unprompted, pick the two components worth deep-diving, name failure modes and tradeoffs before being asked, and push back on at least one requirement with arithmetic.
+1. **[Probable questions + worked answers](/google-interview/3-ml-architecture-questions/)** — the tiered question map, with four full staff-level answers: [TPU-friendly model co-design](/google-interview/4-answer-tpu-friendly-model/), [Gemini-class serving](/google-interview/5-answer-tpu-serving/), [pod-scale MoE training](/google-interview/6-answer-pod-training/), and [fleet-wide perf regression detection](/google-interview/7-answer-perf-regression/) (full artifact-rich version: [open directly](/answers/perf-regression-detection.html)). Each ends with Staff+ signals, falls-short lists, and a confidence ledger — re-derive the numbers, don't memorize them.
+2. **[Optimization track](/optimization/0-overview/)** — the substrate: serving, KV cache, parallelism, quantization, TPU/XLA. The [mental-math drills](/optimization/15-mental-math-drills/) are the per-day habit; interviewers use fumbled arithmetic as a shallowness signal.
+3. **[TTFT Optimization Program](/optimization/1-ttft-optim/)** — the template for how a staff-level design answer *sounds*: measurement first, budget decomposition, sequenced plan, explicit pushback.
+4. **[Trace-reading track](/trace-reading/0-overview/)** — for the "here's a profile, what's wrong" moment inside a design round.
+5. L6 rubric, condensed from reported loops: *you* drive — propose scope, do the estimates unprompted, pick the two components worth deep-diving, name failure modes and tradeoffs before being asked, and push back on at least one requirement with arithmetic.
 
 The interview script for any perf design prompt: **state the regime** (prefill/decode, compute/memory-bound, latency/throughput) → **do the roofline/bytes math out loud** → **name the bottleneck** → **design around it** → **say what you'd measure to check yourself**.
 
