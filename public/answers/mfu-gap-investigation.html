@@ -200,6 +200,51 @@ input-stall (amortized)               6.9%      —         —        L3: perio
 Layer window before: 66 (bwd GEMM) + 25 (recompute) + 45 (exposed RS/AG) ≈ 136 ms; ×80 = 10.9 s + fwd-side tails/opt 2.6 s + amortized stalls 1.04 s + framework 0.5 s ≈ 15.0 s ✓<br>
 After: 86 ms × 80 = 6.9 s + tails 0.9 s + framework 0.5 s ≈ 8.3 s ✓ · Recompute total: 25 ms × 80 = 2.0 s ✓ matches fix-(ii) · Exposed: 45 ms × 80 = 3.6 s ✓ matches fix-(i) · Wire under overlap: 36 ms × 80 = 2.9 s &lt; 6.9 s bwd compute → hides ✓</div>
 
+<h3>The GPU-fleet twin: what the same investigation prints on H100s</h3>
+<p>Same incident class on the secondary fleet (256 × H100, 989 TF bf16 → ideal step 3.48 s; observed 13.9 s ≈ 25%). The hierarchy is identical; these are the instruments' actual output formats — quoting them is the difference between "I'd check the kernel summary" and having read one.</p>
+<div class="art"><div class="lbl">Artifact 6 — L0/L2 on GPU: <code>nsys stats --report cuda_gpu_kern_sum report.nsys-rep</code> (top rows)</div>
+<pre> Time (%)  Total Time (ns)  Instances   Avg (ns)     Name
+ --------  ---------------  ---------  -----------  ----------------------------------------------------------
+     21.9    3,050,112,384      2,560    1,191,450  sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize128x256...
+     16.2    2,251,884,096     20,480      109,955  ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL(ncclDevComm...
+     13.4    1,866,240,512      2,560      729,000  sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize128x128...
+     13.3    1,852,177,336      2,560      723,500  sm90_xmma_gemm_bf16bf16_... ← SAME shapes as row 1 fwd GEMM,
+                                                     appearing in BACKWARD phase = the remat duplicate, GPU edition
+      7.7    1,072,693,248     20,480       52,377  ncclDevKernel_AllGather_bf16_RING_LL(...)
+      5.8      807,403,520    163,840        4,928  void at::native::vectorized_elementwise_kernel&lt;4, ...&gt;
+      4.1      570,425,344      2,560      222,822  flash_bwd_dq_dk_dv_loop_kernel&lt;Flash_bwd_kernel_traits...
+</pre>
+<p class="s" style="font-size:.8rem;color:var(--muted)">Two tells in one table: NCCL kernels at 24% of GPU time (but this table can't say exposed-vs-overlapped — that needs the timeline view: kernel-summary time ≠ critical-path time, the classic nsys misread), and the duplicated GEMM signature in backward — the remat fingerprint without reading any HLO/graph, just kernel names and phase.</p></div>
+<div class="art"><div class="lbl">Artifact 7 — L2 kernel deep-dive: <code>ncu --set full -k "regex:sm90_xmma.*tilesize128x256" --launch-count 3</code> (Speed-of-Light excerpt)</div>
+<pre>  sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize128x256x64  (8192 x 28672 x 8192)
+  Section: GPU Speed Of Light Throughput
+    Compute (SM) Throughput           %        54.31      ← vs ~75% healthy for this shape class:
+    Memory Throughput                 %        41.02        not starved, not saturated — suspect
+    DRAM Throughput                   %        38.77        occupancy/tail, not bandwidth
+  Section: Launch Statistics
+    Waves Per SM                                 3.42      ← non-integer wave count: 42% tail wave
+    Theoretical Occupancy             %        66.67         quantization on 132 SMs at this tile
+  Section: Memory Workload Analysis
+    L2 Hit Rate                       %        71.88
+  ncu comment: est. speedup 12–15% from tile-size re-selection (tail-wave reduction)</pre>
+<p class="s" style="font-size:.8rem;color:var(--muted)">The reading discipline: SOL section first (compute% vs memory% names the regime), then wave quantization for the "GEMM is 54% of peak but memory isn't the reason" case — the GPU analogue of TPU tile-padding waste, and the same fix family (shape/tile alignment).</p></div>
+<div class="art"><div class="lbl">Artifact 8 — L1/L4 on GPU: exposed-NCCL check and the DVFS trap</div>
+<pre># L1: timeline-level exposure (nsys GUI or stats nccl + gaps): per-step totals
+  nccl wire-time (sum of kernel durations):        1.30 s
+  nccl on critical path (MXU-idle overlap gap):    0.85 s   ← exposed: scheduling, and
+  backward compute available to hide under:        6.10 s     PyTorch side: check
+  → same verdict shape as TPU fix-(i): reorder;      DDP bucket sizes + stream priorities
+# L4: before trusting ANY GPU number (the TPU fleet never needs this step):
+$ nvidia-smi dmon -s pucm -c 3
+  # gpu    pwr  gtemp  mtemp     sm    mem    enc    dec    mclk    pclk
+  # 0      688     74     62     99     67      0      0    2619    1830
+  # 1      702     81     64     99     71      0      0    2619    1650  ← 180 MHz down:
+  # 2      691     76     61     99     69      0      0    2619    1815    thermal throttle on
+                                                                            rank 1 = fleet-wide
+                                                                            straggler at every
+                                                                            synchronous step
+$ sudo nvidia-smi -lgc 1830,1830   # lock clocks before ANY comparative measurement</pre>
+<p class="s" style="font-size:.8rem;color:var(--muted)">The two GPU-only habits, shown rather than described: kernel-sum NCCL time is not exposure (only the timeline gap is), and clock state is checked <em>before</em> the first measurement is believed — one throttling rank manufactures a "regression" that no software fix will find.</p></div>
 <h2 id="s6">6 · From Incident to Process</h2>
 <div class="dia"><svg viewBox="0 0 860 170" width="860" height="170">
 <style>.b{fill:var(--panel);stroke:var(--muted);rx:6}.g{fill:var(--accent-soft);stroke:var(--accent);rx:6}.t{font-size:10.5px;fill:var(--ink)}.s{font-size:9.5px;fill:var(--muted)}.a{stroke:var(--accent);stroke-width:1.4;marker-end:url(#ar4)}</style>
