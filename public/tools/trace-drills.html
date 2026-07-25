@@ -243,7 +243,7 @@ function S_bubble(){
     final:`Pipeline bubbles — warm-up/flush idle at the step edges; utilization ~${(100*(2*0.45+4*0.85+2*0.45)/8).toFixed(0)}%, bounded by microbatches-per-stage, not by any kernel`,
     sig:`Pipeline stages form an assembly line: a microbatch must traverse stages in order, so the LAST stage idles while the first microbatch travels down (warm-up), and the FIRST stage idles while the last one drains — the two triangles of forced idle are the bubble:<pre>time →     1   2   3   4   5   6   7\nStage 1: [ 1 ][ 2 ][ 3 ][ 4 ] .   .   .\nStage 2:   . [ 1 ][ 2 ][ 3 ][ 4 ] .   .\nStage 3:   .   . [ 1 ][ 2 ][ 3 ][ 4 ] .\nStage 4:   .   .   . [ 1 ][ 2 ][ 3 ][ 4 ]</pre>Each stage does m cells of work on a timeline of m+(p−1) cells → bubble = (p−1)/(m+p−1); here 3/7≈43%. Every kernel is individually perfect — the schedule's shape is the diagnosis. 1F1B is the steady-state fwd/bwd ordering (bounds activation memory, not the bubble).`,
     conf:`Compute bubble math: with m microbatches and p stages, ideal bubble = (p−1)/(m+p−1); compare against measured idle fraction. If measured ≫ ideal, look for imbalanced stages instead.`,
-    fix:`More microbatches (bubble shrinks hyperbolically), interleaved/looped schedules (virtual stages), or rebalance layers across stages if one stage's chunks run long. See /optimization/13-parallelism-stack/.`};
+    fix:`More microbatches (bubble shrinks hyperbolically), interleaved/looped schedules (virtual stages), or rebalance layers across stages if one stage's chunks run long. See /training/4-parallelism-stack/.`};
 }
 function S_alloc(){
   const step=rnd(42,54);

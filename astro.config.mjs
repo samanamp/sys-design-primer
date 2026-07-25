@@ -83,6 +83,10 @@ export default defineConfig({
 					autogenerate: { directory: 'optimization' },
 				},
 				{
+					label: 'Training',
+					autogenerate: { directory: 'training' },
+				},
+				{
 					label: 'Algorithms',
 					autogenerate: { directory: 'algorithms' },
 				},

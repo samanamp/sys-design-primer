@@ -26,7 +26,7 @@ And one framing statement: **TTFT is a prefill/queueing problem, TPOT is a decod
 
 I do this before drawing boxes, because the box diagram is the same for every candidate; the arithmetic is not. All numbers are order-of-magnitude and I'd re-derive them from profiled measurements before believing them.
 
-**Model.** Gemini-class: assume a ~400B-total-parameter MoE with ~40B active per token (the [MoE](/optimization/6-mixture-of-experts/) shape that makes flagship serving affordable). Serve weights in FP8/int8 — Ironwood has native FP8 (4,614 TFLOPS/chip), and int8 via AQT is the proven TPU path (see [quantization](/optimization/16-quantization/)).
+**Model.** Gemini-class: assume a ~400B-total-parameter MoE with ~40B active per token (the [MoE](/training/7-mixture-of-experts/) shape that makes flagship serving affordable). Serve weights in FP8/int8 — Ironwood has native FP8 (4,614 TFLOPS/chip), and int8 via AQT is the proven TPU path (see [quantization](/optimization/16-quantization/)).
 
 **Bytes.**
 - Weights at 1 byte/param: **~400 GB**. Doesn't fit one chip → the serving unit is a multi-chip slice.

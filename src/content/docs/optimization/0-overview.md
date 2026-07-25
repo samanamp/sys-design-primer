@@ -34,13 +34,13 @@ Eighteen docs covering ML performance engineering at staff level: how models get
 **Architecture-level levers**
 
 - [Attention Optimization](/optimization/7-attention-optimization/) — canonical home for MQA/GQA/MLA/sparse-attention math.
-- [Mixture of Experts](/optimization/6-mixture-of-experts/) — routing, load balancing, and the wide-EP inference-systems era (EPLB, DeepEP).
+- [Mixture of Experts](/training/7-mixture-of-experts/) — routing, load balancing, and the wide-EP inference-systems era (EPLB, DeepEP).
 
-**Training at scale**
+**Training at scale** (these now live in the [Training track](/training/0-overview/), which tells the full arc)
 
-- [Tensor, Pipeline, Sequence, Context, and Expert Parallelism](/optimization/13-parallelism-stack/) — parallelism as a communication-design problem; the bottleneck→layout decision tree.
-- [ZeRO and FSDP](/optimization/12-zero-fsdp-sharded-training/) — sharding model state; the 16-bytes/param math.
-- [Activation Checkpointing](/optimization/11-activation-checkpointing/) — the memory↔compute dial sharding doesn't touch.
+- [Tensor, Pipeline, Sequence, Context, and Expert Parallelism](/training/4-parallelism-stack/) — parallelism as a communication-design problem; the bottleneck→layout decision tree.
+- [ZeRO and FSDP](/training/3-zero-fsdp-sharded-training/) — sharding model state; the 16-bytes/param math.
+- [Activation Checkpointing](/training/2-activation-checkpointing/) — the memory↔compute dial sharding doesn't touch.
 
 **Hardware and kernels**
 

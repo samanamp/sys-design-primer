@@ -258,7 +258,7 @@ Staff-level point:
 
 ## 7. Mixture of Experts: Sparse Parameters, Dense Experts
 
-Mixture of Experts is a different kind of sparsity: the model may have many parameters, but a router activates only a few experts per token, and each selected expert is usually a dense MLP. Routing math, capacity factors, load balancing, expert parallelism, and serving are covered in depth in [the MoE article](/optimization/6-mixture-of-experts/).
+Mixture of Experts is a different kind of sparsity: the model may have many parameters, but a router activates only a few experts per token, and each selected expert is usually a dense MLP. Routing math, capacity factors, load balancing, expert parallelism, and serving are covered in depth in [the MoE article](/training/7-mixture-of-experts/).
 
 For this article's hardware lens, the point is that MoE's sparsity is expert-level, and its cost is communication: tokens must be dispatched to the GPUs that own their selected experts via all-to-all, computed densely, then combined back. All-to-all overhead, expert load imbalance, token dropping, small expert batches, and placement can erase the compute savings. In production, MoE performance is not just "active parameters." It is router quality, expert placement, communication overlap, and batching.
 

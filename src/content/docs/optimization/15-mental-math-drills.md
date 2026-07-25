@@ -54,7 +54,7 @@ $$\text{smem} = \text{stages} \cdot (B_m B_k + B_k B_n) \cdot b_{\text{dtype}}, 
 
 **KV-cache capacity.** Concurrent sequences ≈ (HBM − weights) ÷ KV-per-sequence. This bounds batch size, which bounds decode arithmetic intensity, which bounds throughput — the whole serving-economics chain in one division.
 
-**Training memory.** Adam mixed precision ≈ **16 bytes/param** of model state (2 bf16 weight + 2 grad + 12 fp32 optimizer/master), sharded by ZeRO-3/FSDP degree, plus activations (shrinkable via checkpointing — see [Activation Checkpointing](/optimization/11-activation-checkpointing/)).
+**Training memory.** Adam mixed precision ≈ **16 bytes/param** of model state (2 bf16 weight + 2 grad + 12 fp32 optimizer/master), sharded by ZeRO-3/FSDP degree, plus activations (shrinkable via checkpointing — see [Activation Checkpointing](/training/2-activation-checkpointing/)).
 
 ## Drill protocol
 

@@ -7,7 +7,7 @@ description: "A staff-level worked interview answer: end-to-end distributed trai
 
 **The question:** "Design end-to-end distributed training for a roughly 1-trillion-parameter MoE model across TPU pods. Cover the parallelism layout, the data pipeline, failure handling, and what you monitor." (45–60 minutes, escalating follow-ups.)
 
-This is the question where the ML-performance staff signal either shows up or doesn't. The taxonomy of parallelism strategies is table stakes — it's covered in [the parallelism stack](/optimization/13-parallelism-stack/) and [ZeRO/FSDP](/optimization/12-zero-fsdp-sharded-training/), and quoting it back is a senior answer. The staff answer maps the taxonomy onto a physical torus, does the arithmetic out loud, and spends real time on the part most candidates skip: **keeping 10,000 chips productive when they fail every few hours**.
+This is the question where the ML-performance staff signal either shows up or doesn't. The taxonomy of parallelism strategies is table stakes — it's covered in [the parallelism stack](/training/4-parallelism-stack/) and [ZeRO/FSDP](/training/3-zero-fsdp-sharded-training/), and quoting it back is a senior answer. The staff answer maps the taxonomy onto a physical torus, does the arithmetic out loud, and spends real time on the part most candidates skip: **keeping 10,000 chips productive when they fail every few hours**.
 
 ---
 
@@ -50,7 +50,7 @@ On MFU expectations: MaxText publishes ~65–70% MFU on v5p for **dense** models
 
 ### Per-step time — and picking the batch to fit the mesh
 
-Don't pick a round batch number and hope it shards; pick the batch *from* the mesh. 8,960 chips per pod factors as $2^8 \times 5 \times 7$ — a power-of-two sequence count (say 2,048) can **never** divide evenly across it. The layout in section 3 uses a per-pod mesh `(fsdp=35, cp=4, ep=64)`, so choose **2,240 sequences per pod = 4,480 global = ~37M tokens** (4,480 × 8,192 = 36.7M). That lands exactly one sequence per (fsdp, expert) coordinate, split 4 ways along the context axis: **per-chip batch = one 2,048-token shard of one sequence**, no fractional sequences anywhere. A ~37M-token global batch is within the range frontier runs actually use late in training (DeepSeek-V3 ramped to ~60M); batch warmup early in the run is a schedule detail (start on one pod or a sub-mesh), not a layout change. Why there's a ceiling at all, and how it's measured, is the [critical-batch-size primer](/google-interview/10-batch-size-primer/).
+Don't pick a round batch number and hope it shards; pick the batch *from* the mesh. 8,960 chips per pod factors as $2^8 \times 5 \times 7$ — a power-of-two sequence count (say 2,048) can **never** divide evenly across it. The layout in section 3 uses a per-pod mesh `(fsdp=35, cp=4, ep=64)`, so choose **2,240 sequences per pod = 4,480 global = ~37M tokens** (4,480 × 8,192 = 36.7M). That lands exactly one sequence per (fsdp, expert) coordinate, split 4 ways along the context axis: **per-chip batch = one 2,048-token shard of one sequence**, no fractional sequences anywhere. A ~37M-token global batch is within the range frontier runs actually use late in training (DeepSeek-V3 ramped to ~60M); batch warmup early in the run is a schedule detail (start on one pod or a sub-mesh), not a layout change. Why there's a ceiling at all, and how it's measured, is the [critical-batch-size primer](/training/1-batch-size-primer/).
 
 $$
 \frac{6 \times 100\text{B} \times 36.7\text{M}}{2.06 \times 10^{18} \times 2 \text{ pods}} \approx 5.3 \text{ s/step}, \quad \sim 410\text{K steps total}
@@ -68,7 +68,7 @@ Data parallelism and FSDP stay **compute-bound** (collectives fully hideable) on
 
 ### Memory
 
-Model state at 16 bytes/param (bf16 param + grad, fp32 master + Adam moments — the [standard breakdown](/optimization/12-zero-fsdp-sharded-training/)):
+Model state at 16 bytes/param (bf16 param + grad, fp32 master + Adam moments — the [standard breakdown](/training/3-zero-fsdp-sharded-training/)):
 
 $$
 1\text{T} \times 16\text{B} = 16 \text{ TB of model state}
@@ -113,7 +113,7 @@ This is the first staff signal: the memory math says you do **not** need aggress
 
 ## 3. Parallelism → Topology Mapping (minutes 12–22)
 
-The [parallelism taxonomy](/optimization/13-parallelism-stack/) tells you the strategies; the v5p 3D torus and the ICI/DCN boundary tell you where each one is allowed to live. The rule from [the TPU article](/optimization/18-tpu-xla-optimization/): match communication frequency and volume to physical link speed.
+The [parallelism taxonomy](/training/4-parallelism-stack/) tells you the strategies; the v5p 3D torus and the ICI/DCN boundary tell you where each one is allowed to live. The rule from [the TPU article](/optimization/18-tpu-xla-optimization/): match communication frequency and volume to physical link speed.
 
 ```text
 Physical hierarchy                 What runs on it
