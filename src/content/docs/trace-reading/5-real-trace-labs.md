@@ -11,13 +11,32 @@ The [drills](/trace-reading/4-trace-drills/) are synthetic and the [hands-on lab
 
 **[▶ hta_trace_lab.ipynb](/notebooks/hta_trace_lab.ipynb)** · Artifacts: 8 per-rank Kineto JSONs from a real vision-transformer DDP job (HTA's demo data, ~4.5 MB/rank, auto-downloaded).
 
-The flow: load `rank-0.json.gz` in [ui.perfetto.dev](https://ui.perfetto.dev) and commit four numbers by eye (step time, GPU-idle fraction, overlapped-vs-serialized NCCL, top kernel family) — then run HTA's four analyses (temporal breakdown, comm-comp overlap %, idle-time attribution, kernel breakdown) and reconcile. Target: manual reads within ~10% of computed. These four quantities are exactly the [step-anatomy decomposition](/google-interview/6-answer-pod-training/) the pod-training answer does with claimed numbers — here you compute them from a real trace.
+The flow: load `rank-0.json.gz` in [ui.perfetto.dev](https://ui.perfetto.dev) and commit five reads by eye (step time, idle fraction, NCCL-vs-compute ratio, overlap call, one-sentence diagnosis) — then run HTA's analyses and reconcile against the **ground-truth answer key computed from these exact files** (in the notebook, spoiler-folded). This artifact has a real, diagnosable pathology: it is a **communication-dominated job** (~61% of kernel time is NCCL, ~20% compute, overlap only ~20–22%, rank-0 idle 71% host-wait) — a *ratio* failure no scheduler can hide, i.e. the [scaling-book per-device-batch floor](/training/1-batch-size-primer/) violated in the wild. The final exercise is the five-sentence narration ending in a fix that changes the ratio, not just the schedule.
 
 ## Lab R2 — Fleet reliability from real LLM-cluster data (AcmeTrace)
 
 **[▶ acmetrace_goodput_lab.ipynb](/notebooks/acmetrace_goodput_lab.ipynb)** · Artifacts: 880K job records from Shanghai AI Lab's two A100 clusters over six months (NSDI '24), including an explicit `NODE_FAIL` state.
 
 The flow: job-mix shape (large jobs = sliver of count, bulk of GPU-hours) → terminal states by scale → **empirical MTBF from NODE_FAIL events in large long-running jobs** → the goodput waterfall from data. The punchline, which we validated while building the lab: real per-GPU MTBF comes out ≈ **15–21 years**, meaning the pod-training answer's 5-year prior is conservative by ~3–4× — and Young's √(2C·MTBF) means even a 4× better MTBF only *doubles* the checkpoint interval, so the "checkpoint every few minutes" conclusion survives contact with data. The lab ends with the confidence-ledger exercise: measured vs proxied vs assumed, applied to your own analysis. Bonus finding worth understanding before you run it: CANCELLED dominates GPU-hours (~66%) — big pretraining jobs run open-ended and get cancelled at convergence, the dataset's best lesson in *terminal state ≠ outcome quality*.
+
+## Coverage: fault catalog × where you practice it
+
+The [tools pages](/trace-reading/tools/1-nsys/) teach ~40 faults; not all are practicable on public artifacts. Where each major fault family gets hands-on reps:
+
+| Fault family | Real artifact (R1/R2) | Synthetic [drills](/tools/trace-drills.html) | Self-capture ([Labs A–C](/trace-reading/3-hands-on-profiling/) + planned injection) |
+| --- | --- | --- | --- |
+| Exposed/unoverlapped communication | **R1 — the artifact's actual pathology** | ✓ | ✓ (injectable) |
+| Host-bound / launch-bound | R1 idle-attribution (71% host_wait) + launch-stats stretch | ✓ | ✓ |
+| Input starvation | — (not exhibited) | ✓ | ✓ (num_workers=0) |
+| Straggler rank | R1 cross-rank diffs (mild spread) | ✓ | ✓ (throttle one rank) |
+| Sync-forcing ops | — | ✓ | ✓ (`.item()` injection) |
+| Memory churn / H2D | R1 memory-bw stretch | — | ✓ |
+| Kernel-level (SOL/occupancy/coalescing) | — (needs [ncu](/trace-reading/tools/2-ncu/), no public reports) | — | ✓ (ncu exercises on own kernels) |
+| Recompilation, DVFS, checkpoint stalls | — | ✓ (some) | ✓ |
+| MoE all-to-all, multi-node NCCL | — (no public artifact exists) | ✓ (a2a scenario) | requires multi-node rental |
+| Fleet: failures, MTBF, goodput, queueing | **R2 — measured from 880K real jobs** | — | — |
+
+Read the gaps honestly: sync-hunting and kernel-level work only exist as self-capture; MoE-scale comm patterns have no public artifact at all — the synthetic drills and the worked answers carry those.
 
 ## The dataset shelf
 
