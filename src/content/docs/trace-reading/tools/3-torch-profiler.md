@@ -83,6 +83,8 @@ These four outputs are the same four quantities the [pod-training step-anatomy](
 
 ## 5. Exercises
 
+The full guided version of exercises 1–2 is **[Lab R1](/trace-reading/5-real-trace-labs/)** with its [companion notebook](/notebooks/hta_trace_lab.ipynb).
+
 1. **HTA lab:** on the repo's demo traces, compute overlap % and idle-time attribution per rank *by hand from the timeline* for one rank (pick three gaps, attribute each), then run HTA and reconcile. Target: your manual numbers within ~10%.
 2. **Straggler drill:** feed HTA the demo traces, find the worst rank by temporal breakdown, and write the five-sentence narration naming the catalog row.
 3. **Sync hunt:** add `if loss.item() > 100: print(...)` to Lab A's loop ([hands-on](/trace-reading/3-hands-on-profiling/)), capture, and locate the sync from the key_averages table alone — count how many step-serializations one line costs.

@@ -26,6 +26,8 @@ The tiers above train *signatures* tool-agnostically. The **tools sub-track** tr
 - **[torch.profiler & HTA](/trace-reading/tools/3-torch-profiler/)** — the framework view: kernel↔op↔python-line correlation, multi-rank HTA analyses on real public traces.
 - **[xprof](/trace-reading/tools/4-xprof/)** — the TPU side: op profile, exposed async collectives, remat, sharding faults.
 
+**[Real-Trace Labs & Datasets](/trace-reading/5-real-trace-labs/)** puts both layers on real public artifacts: HTA's 8-GPU traces (Perfetto + notebook reconciliation) and AcmeTrace's 880K-job cluster data (empirical MTBF and goodput), plus the dataset shelf with what each source can and can't teach.
+
 The rule that binds them is the **altitude ladder**: step time (nsys/xprof timeline) → op/module (torch profiler / op profile) → single kernel (ncu). Descend only when the level above has localized the suspect — ncu on a starved workload is a microscope pointed at the wrong problem.
 
 **[▶ The interactive trace trainer](/tools/trace-drills.html)** — randomized synthetic Nsight-style timelines with an injected pathology (or none — healthy traces are in the rotation, and two scenarios are deliberate lookalikes of others, because recognizing a clean trace and telling twins apart is part of the skill). Two-minute clock, diagnosis-first, full reveal with signature, confirming measurement, and fix.
