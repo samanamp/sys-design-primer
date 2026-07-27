@@ -7,7 +7,7 @@ description: "Hands-on labs on real public artifacts — HTA's 8-GPU training tr
 
 The [drills](/trace-reading/4-trace-drills/) are synthetic and the [hands-on labs](/trace-reading/3-hands-on-profiling/) are self-captured; this page is the third leg — **real artifacts from other people's training runs**. The format split matters: timeline reading is a *viewer* skill (Perfetto/Nsight, eyes and scroll wheel), aggregate analysis is a *notebook* skill (pandas). Each lab below uses both, in that order: commit numbers from the viewer first, then compute the truth and reconcile.
 
-Fourteen labs, four sources: **real kernel-level traces** (R1, R3–R6, R14 — other people's systems), **fault-injected traces generated for this track** (R7–R9 — real profiler output, exact ground truth because the fault was injected on purpose; regenerate or extend with [generate.py](/traces/labs/generate.py)), **fleet data** (R2, R10), and **production LLM inference request traces** (R11–R13 — the datasets the serving papers were actually built on). Protocol everywhere: commit numbers from the artifact before computing.
+Sixteen labs, four sources: **real kernel-level traces** (R1, R3–R6, R14 — other people's systems), **fault-injected traces generated for this track** (R7–R9 — real profiler output, exact ground truth because the fault was injected on purpose; regenerate or extend with [generate.py](/traces/labs/generate.py)), **fleet data** (R2, R10), and **production LLM inference request traces** (R11–R13, R16 — the datasets the serving papers were actually built on; R15 — a frontier lab's own kernel traces). Protocol everywhere: commit numbers from the artifact before computing.
 
 ## Lab R1 — Real 8-GPU training traces (HTA demo set)
 
@@ -130,6 +130,18 @@ Kernel traces show *how* a step runs; these show *what production asks for* — 
 
 **Task:** run the R1/R3 reading order on non-NVIDIA timelines. The point is transfer: kernel names, stream semantics, and copy engines differ; the *method* (step boundary → gaps → overlap → longest kernel) does not. Write down which of the nine [vocabulary signatures](/trace-reading/1-trace-reading-vocabulary/) you can still identify without NVIDIA-specific cues — that's the tool-agnostic skill the whole track claims to build, tested.
 
+## Lab R15 — DeepSeek's own traces: a frontier MoE stack, profiled
+
+**Artifact:** [deepseek-ai/profile-data](https://github.com/deepseek-ai/profile-data) — real PyTorch-profiler traces from DeepSeek's production framework, released during open-infra week: `prefill.json` (EP32, 4K prompts, 16K tok/GPU, two micro-batches), `decode.json` (EP128, 128 req/GPU, RDMA all-to-all), `train.json` (DualPipe, EP64). Load directly in Perfetto or `chrome://tracing`.
+
+**Task:** this is the closest public artifact to "what a frontier lab's timeline actually looks like." (1) In `decode.json`, find the **dual micro-batch overlap**: one micro-batch's attention/MLP compute hiding the other's all-to-all — the comm-hiding condition from the [pod-training answer](/google-interview/6-answer-pod-training/) (*a2a hides iff per-layer a2a ≤ paired compute*), observable on a real timeline. Measure the exposed remainder. (2) Compare prefill vs decode: same model, both phases — verify the regime split (dense compute blocks vs KV/comm-dominated steps) you know from the [roofline cards](/training/1-batch-size-primer/). (3) In `train.json`, identify DualPipe's interleaved forward/backward chunks and where the EP all-to-all sits relative to them. (4) Write the five-sentence narration for decode as if it were your fleet — then ask: what would you check next that this trace can't show you (the answer involves per-expert load balance)?
+
+## Lab R16 — WildChat-1M: real multi-turn session structure
+
+**Artifact:** [allenai/WildChat-1M](https://huggingface.co/datasets/allenai/WildChat-1M) (838K real conversations, UTC timestamps, turn counts to 249, model/country/language fields; ODC-BY, parquet on HF).
+
+**Task:** the session-dynamics lab — the piece R11–R13's flat request streams can't teach: (1) compute **inter-turn gap distributions** — this is the real input to the [KV offload decision inequality](/trace-reading/tools/3-torch-profiler/) (keep KV resident vs page out between turns: what fraction of turn-gaps exceed the reload-beats-recompute threshold?); (2) session length × turn count → cumulative re-prefill cost naive vs prefix-cached (the multi-turn card's quadratic-vs-linear claim, on real sessions); (3) diurnal + geographic load curves → replica-count schedule; (4) turn-count long tail (max 249!) → what session-affinity routing must tolerate. Sibling dataset: LMSYS-Chat-1M for cross-checking distributions.
+
 ## The dataset shelf
 
 | Dataset | What it is | Teaches | Can't teach |
@@ -143,9 +155,12 @@ Kernel traces show *how* a step runs; these show *what production asks for* — 
 | [Azure LLM inference traces](https://github.com/Azure/AzurePublicDataset) | Production request traces (arrivals, token counts; 2023–2025, incl. multimodal) | Workload characterization, disaggregation math, SLO capacity planning | Anything below the request level |
 | [Mooncake trace](https://github.com/kvcache-ai/Mooncake/tree/main/FAST25-release) (FAST'25) | Requests + real KV block hashes | Prefix-cache hit rates, KV-aware routing value — measured, not assumed | Kernel/step internals |
 | [BurstGPT](https://github.com/HPMLL/BurstGPT) | 5.3M requests, 121 days, incl. failures | Arrival burstiness, autoscaling signals, peak-to-mean headroom | Per-request latency internals |
+| [DeepSeek profile-data](https://github.com/deepseek-ai/profile-data) | Real prefill/decode/DualPipe traces from a frontier MoE stack | Dual-microbatch comm hiding, EP all-to-all anatomy, phase contrast | Fleet behavior; per-expert balance over time |
+| [WildChat-1M](https://huggingface.co/datasets/allenai/WildChat-1M) / LMSYS-Chat-1M | 838K real conversations with timestamps | Session structure: inter-turn gaps, KV offload economics, diurnal load | Token-level serving internals |
+| [MLPerf inference results](https://github.com/mlcommons/inference_results_v5.0) | Vendor-submitted loadgen latency logs | SLO/percentile reading across hardware, scenario semantics (server vs offline) | Why a submission is fast (configs are tuned black boxes) |
 | Your own captures ([Lab A–C](/trace-reading/3-hands-on-profiling/)) | nsys/torch.profiler with faults *you* injected | Ground-truth diagnosis practice — the only artifacts where you know the answer | Someone else's surprises |
 
-The honest gap this shelf can't fill: **no lab publishes kernel-level traces of a frontier run.** The closest substitutes are self-captured traces of open training stacks (torchtitan, MaxText) and the worked artifacts in the [MFU-gap answer](/answers/mfu-gap-investigation.html).
+The honest gap, updated: for years **no lab published kernel-level traces of a frontier run** — DeepSeek's open-infra-week release (R15) broke that in early 2025 with real prefill/decode/DualPipe traces, though they remain curated single-node excerpts, not a full-fleet capture. The remaining substitutes: self-captured traces of open stacks (torchtitan, MaxText) and the worked artifacts in the [MFU-gap answer](/answers/mfu-gap-investigation.html).
 
 ## Iteration queue
 
