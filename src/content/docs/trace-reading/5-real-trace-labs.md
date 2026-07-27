@@ -3,7 +3,7 @@ title: "Real-Trace Labs & Datasets"
 description: "Hands-on labs on real public artifacts — HTA's 8-GPU training traces in Perfetto + notebook, AcmeTrace fleet reliability analysis — and the reference list of public trace datasets with what each can and cannot teach."
 ---
 
-# Real-Trace Labs and Public Datasets (R1–R10)
+# Real-Trace Labs and Public Datasets (R1–R16)
 
 The [drills](/trace-reading/4-trace-drills/) are synthetic and the [hands-on labs](/trace-reading/3-hands-on-profiling/) are self-captured; this page is the third leg — **real artifacts from other people's training runs**. The format split matters: timeline reading is a *viewer* skill (Perfetto/Nsight, eyes and scroll wheel), aggregate analysis is a *notebook* skill (pandas). Each lab below uses both, in that order: commit numbers from the viewer first, then compute the truth and reconcile.
 
