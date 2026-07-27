@@ -7,7 +7,7 @@ description: "Hands-on labs on real public artifacts — HTA's 8-GPU training tr
 
 The [drills](/trace-reading/4-trace-drills/) are synthetic and the [hands-on labs](/trace-reading/3-hands-on-profiling/) are self-captured; this page is the third leg — **real artifacts from other people's training runs**. The format split matters: timeline reading is a *viewer* skill (Perfetto/Nsight, eyes and scroll wheel), aggregate analysis is a *notebook* skill (pandas). Each lab below uses both, in that order: commit numbers from the viewer first, then compute the truth and reconcile.
 
-Ten labs, three sources: **real public traces** (R1–R6 — other people's systems, guidance-level answers), **fault-injected traces generated for this track** (R7–R9 — real profiler output, exact ground truth because the fault was injected on purpose; regenerate or extend with [generate.py](/traces/labs/generate.py)), and **fleet data** (R2, R10). Protocol everywhere: commit numbers from the viewer before computing.
+Fourteen labs, four sources: **real kernel-level traces** (R1, R3–R6, R14 — other people's systems), **fault-injected traces generated for this track** (R7–R9 — real profiler output, exact ground truth because the fault was injected on purpose; regenerate or extend with [generate.py](/traces/labs/generate.py)), **fleet data** (R2, R10), and **production LLM inference request traces** (R11–R13 — the datasets the serving papers were actually built on). Protocol everywhere: commit numbers from the artifact before computing.
 
 ## Lab R1 — Real 8-GPU training traces (HTA demo set)
 
@@ -102,6 +102,34 @@ p50 **45 ms**, max **104 ms**, healthy math underneath (forward ≈ 1 ms). Fault
 
 **Task:** repeat R2's Part-1/Part-2 analysis on Philly (job mix by GPU count, failure rates, queueing delay), then answer the comparative questions: how did the job-size distribution shift between the DNN era and the LLM era? Did large-job failure rates improve? Queue-wait? Write five sentences on what changed *because the workload changed* vs what stayed (the constants of GPU-cluster life). This is the systems-evolution perspective interviewers probe with "how has serving/training infrastructure changed since 2018?"
 
+## Labs R11–R13 — Production LLM inference request traces
+
+Kernel traces show *how* a step runs; these show *what production asks for* — request-level traces from real LLM services, released for serving research. They are the workload side of every `[batching]`/`[capacity]` card in the inference-optimization deck.
+
+### R11 — Azure LLM inference traces (the Splitwise dataset)
+
+**Artifact:** [Azure/AzurePublicDataset](https://github.com/Azure/AzurePublicDataset) — `AzureLLMInferenceDataset2023` (per-request arrival time + input/output token counts; the ISCA'24 Splitwise paper's data) and the 2024/2025 successors (DynamoLLM; multimodal ModServe).
+
+**Task:** reproduce the argument for prefill/decode disaggregation from the raw data: (1) plot input-vs-output token distributions (code vs conversation subsets differ sharply); (2) compute each request's prefill FLOPs and decode bandwidth-seconds using the [roofline formulas](/training/1-batch-size-primer/); (3) show the fleet-level prefill:decode resource ratio and its variance over hours — that variance IS the case for independent pool scaling. Stretch: feed the arrival process into a simple goodput simulator at a fixed TTFT/TPOT SLO and find the utilization knee.
+
+### R12 — Mooncake trace: prefix caching against real block hashes
+
+**Artifact:** [`mooncake_trace.jsonl`](https://github.com/kvcache-ai/Mooncake/blob/main/FAST25-release/arxiv-trace/mooncake_trace.jsonl) (FAST'25 artifact) — arrivals, token counts, and **remapped KV block hashes** per request; the repo ships a cache-size calculator and hit-rate simulator.
+
+**Task:** the only public dataset where prefix reuse is *measurable*, not assumed: (1) compute the theoretical prefix-cache hit rate vs cache size (LRU over blocks, leaf-first — the [PagedAttention card's](/trace-reading/tools/3-torch-profiler/) eviction story on real data); (2) convert hit rate into saved prefill tokens/s and TTFT delta; (3) evaluate KV-aware routing: how much does hit rate drop if requests scatter across 4 replicas vs route-by-prefix? That number is the entire KV-aware-routing debate, computed.
+
+### R13 — BurstGPT: 121 days of real request arrivals
+
+**Artifact:** [HPMLL/BurstGPT](https://github.com/HPMLL/BurstGPT) — ~5.3M ChatGPT/GPT-4 requests (Azure-powered) with timestamps, model, request/response tokens, conversation-vs-API flag, including failed requests.
+
+**Task:** the burstiness lab: (1) test the Poisson assumption — compute the arrival process's coefficient of variation in 1-s/10-s/1-min windows (the paper's finding: bursty at short scales, Gamma-distributed); (2) quantify the capacity consequence: peak-to-mean ratio → the headroom a fixed SLO demands vs Poisson planning; (3) compare conversation vs API traffic shapes (session structure vs machine-gun calls); (4) design the autoscaling signal from the [serving cards](/trace-reading/tools/3-torch-profiler/): token backlog vs request rate, on real data. Stretch: the failed-request subsets — do failures correlate with bursts?
+
+## Lab R14 — Cross-vendor kernel traces (MTIA, AMD)
+
+**Artifacts:** HTA repo: `tests/data/mtia_inference_trace/` (Meta's MTIA accelerator running inference) and `tests/data/amd_trace/` (ROCm).
+
+**Task:** run the R1/R3 reading order on non-NVIDIA timelines. The point is transfer: kernel names, stream semantics, and copy engines differ; the *method* (step boundary → gaps → overlap → longest kernel) does not. Write down which of the nine [vocabulary signatures](/trace-reading/1-trace-reading-vocabulary/) you can still identify without NVIDIA-specific cues — that's the tool-agnostic skill the whole track claims to build, tested.
+
 ## The dataset shelf
 
 | Dataset | What it is | Teaches | Can't teach |
@@ -112,6 +140,9 @@ p50 **45 ms**, max **104 ms**, healthy math underneath (forward ≈ 1 ms). Fault
 | [Alibaba PAI GPU trace](https://github.com/alibaba/clusterdata) (2020) | Production ML cluster, task-level | Heterogeneous sharing, utilization patterns | Training-run internals |
 | [MIT SuperCloud](https://dcc.mit.edu/) | Labeled GPU utilization time series | Utilization-signature classification | Causal diagnosis |
 | [MLCommons Chakra](https://github.com/mlcommons/chakra) | Standardized execution traces (+ ASTRA-sim) | Comm-schedule replay/simulation, what-if topology experiments | Real-system noise, host effects |
+| [Azure LLM inference traces](https://github.com/Azure/AzurePublicDataset) | Production request traces (arrivals, token counts; 2023–2025, incl. multimodal) | Workload characterization, disaggregation math, SLO capacity planning | Anything below the request level |
+| [Mooncake trace](https://github.com/kvcache-ai/Mooncake/tree/main/FAST25-release) (FAST'25) | Requests + real KV block hashes | Prefix-cache hit rates, KV-aware routing value — measured, not assumed | Kernel/step internals |
+| [BurstGPT](https://github.com/HPMLL/BurstGPT) | 5.3M requests, 121 days, incl. failures | Arrival burstiness, autoscaling signals, peak-to-mean headroom | Per-request latency internals |
 | Your own captures ([Lab A–C](/trace-reading/3-hands-on-profiling/)) | nsys/torch.profiler with faults *you* injected | Ground-truth diagnosis practice — the only artifacts where you know the answer | Someone else's surprises |
 
 The honest gap this shelf can't fill: **no lab publishes kernel-level traces of a frontier run.** The closest substitutes are self-captured traces of open training stacks (torchtitan, MaxText) and the worked artifacts in the [MFU-gap answer](/answers/mfu-gap-investigation.html).
