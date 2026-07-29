@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cost-Aware Routing for a Heterogeneous LLM Inference Fleet — Staff Model Answer</title>
+<style>
+:root{
+  --paper:#f6f8f9; --ink:#1a2430; --ink2:#3d4a58; --rule:#ccd6dd;
+  --amber:#b45309; --amber-bg:#fdf3e3; --amber-edge:#d97a1f;
+  --blue:#1d4e89; --blue-bg:#eaf1f8; --blue-edge:#3673b5;
+  --green:#166a4a; --green-bg:#e9f4ee; --green-edge:#2e8b6a;
+  --red:#8f2d2d; --red-bg:#faecec; --red-edge:#c05050;
+  --teal:#0e7c7b; --mono-bg:#eef1f3;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:Charter,"Bitstream Charter",Cambria,Georgia,serif;
+  font-size:16.5px; line-height:1.62;
+}
+.wrap{max-width:900px; margin:0 auto; padding:48px 28px 96px}
+h1,h2,h3,h4{font-family:"Avenir Next","Segoe UI",Inter,system-ui,sans-serif; line-height:1.22; color:var(--ink)}
+h1{font-size:33px; font-weight:700; letter-spacing:-0.01em; margin:0 0 6px}
+.subtitle{font-family:"Avenir Next","Segoe UI",Inter,system-ui,sans-serif; color:var(--ink2); font-size:15px; margin-bottom:4px}
+h2{font-size:24px; margin:56px 0 14px; padding-top:20px; border-top:3px solid var(--ink)}
+h2 .secno{color:var(--amber-edge); margin-right:10px; font-variant-numeric:tabular-nums}
+h3{font-size:18.5px; margin:32px 0 8px}
+h4{font-size:16px; margin:24px 0 6px}
+p{margin:0 0 14px}
+a{color:var(--blue); text-decoration:none}
+a:hover{text-decoration:underline}
+strong{color:var(--ink)}
+code,pre{font-family:"SF Mono",ui-monospace,Consolas,Menlo,monospace; font-size:0.87em}
+code{background:var(--mono-bg); padding:1px 5px; border-radius:3px}
+pre{background:var(--mono-bg); border:1px solid var(--rule); border-radius:6px; padding:14px 16px; overflow-x:auto; line-height:1.5; margin:14px 0}
+table{border-collapse:collapse; width:100%; margin:16px 0; font-size:14.5px; font-family:"Avenir Next","Segoe UI",Inter,system-ui,sans-serif}
+th{background:var(--ink); color:#fff; text-align:left; padding:8px 10px; font-weight:600}
+td{border:1px solid var(--rule); padding:7px 10px; vertical-align:top; background:#fff}
+td.num{font-family:"SF Mono",ui-monospace,Consolas,monospace; font-size:13px; white-space:nowrap}
+tr:nth-child(even) td{background:#f1f4f6}
+.callout{border-radius:6px; padding:14px 18px; margin:18px 0; border-left:5px solid}
+.callout .tag{display:block; font-family:"Avenir Next","Segoe UI",Inter,sans-serif; font-weight:700; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px}
+.staff{background:var(--amber-bg); border-color:var(--amber-edge)} .staff .tag{color:var(--amber)}
+.followup{background:var(--blue-bg); border-color:var(--blue-edge)} .followup .tag{color:var(--blue)}
+.arith{background:var(--green-bg); border-color:var(--green-edge); font-family:"SF Mono",ui-monospace,Consolas,monospace; font-size:13.5px; line-height:1.55} .arith .tag{color:var(--green); font-family:"Avenir Next","Segoe UI",Inter,sans-serif}
+.arith p{margin:0 0 8px}
+.patho{background:var(--red-bg); border-color:var(--red-edge)} .patho .tag{color:var(--red)}
+.toc{background:#fff; border:1px solid var(--rule); border-radius:8px; padding:20px 26px; margin:28px 0 8px; font-family:"Avenir Next","Segoe UI",Inter,sans-serif; font-size:15px}
+.toc ol{margin:8px 0 0; padding-left:22px}
+.toc li{margin:4px 0}
+figure{margin:24px 0; text-align:center}
+figure svg{max-width:100%; height:auto; background:#fff; border:1px solid var(--rule); border-radius:8px}
+figcaption{font-family:"Avenir Next","Segoe UI",Inter,sans-serif; font-size:13.5px; color:var(--ink2); margin-top:8px; text-align:left}
+.assume{background:#fff; border:1px dashed var(--ink2); border-radius:6px; padding:12px 16px; margin:16px 0; font-size:15px}
+.assume .tag{font-family:"Avenir Next","Segoe UI",Inter,sans-serif; font-weight:700; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink2); display:block; margin-bottom:4px}
+ul,ol{margin:0 0 14px; padding-left:26px}
+li{margin:5px 0}
+.small{font-size:13.5px; color:var(--ink2)}
+hr{border:0; border-top:1px solid var(--rule); margin:32px 0}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>Smart, Cost-Aware Routing of LLM Requests</h1>
+<p class="subtitle">Staff-level model answer · 60-minute system design round · TPU-primary (v5e / Trillium / Ironwood) + GPU fleet (H100 / B200) · July 2026</p>
+<p class="subtitle">Hardware price anchors: GCP public list (Ironwood $12.00 OD / $5.40 3-yr CUD per chip-hr; Trillium $2.70 / $1.22; v5e $1.20 / $0.54) and mid-2026 GPU market medians (H100 ≈ $2.3–3.1/hr; B200 ≈ $5.9/hr). Internal amortized rates assumed below.</p>
+
+<nav class="toc"><strong>Contents</strong>
+<ol>
+<li><a href="#s1">Clarifying questions, requirements, and router SLOs</a></li>
+<li><a href="#s2">Cost model first: the $/token table that grounds every decision</a></li>
+<li><a href="#s3">Model selection layer: cascades and quality-aware routing</a></li>
+<li><a href="#s4">Placement and per-request routing</a></li>
+<li><a href="#s5">The feedback and estimation plane</a></li>
+<li><a href="#s6">Worked end-to-end example: one request, real numbers</a></li>
+<li><a href="#s7">Failure modes and pathologies</a></li>
+<li><a href="#s8">Consolidated interviewer follow-ups</a></li>
+<li><a href="#s9">Staff-signal summary</a></li>
+<li><a href="#s10">60-minute delivery run sheet</a></li>
+</ol>
+</nav>
+
+<h2 id="s1"><span class="secno">1</span>Clarifying questions, requirements, and router SLOs</h2>
+
+<p>The first move in the room is to establish that "routing" here is a <em>joint optimization at three timescales</em>, not a load balancer. Which model variant serves a request, which hardware pool it lands in, and which replica within the pool are coupled decisions: the variant choice constrains which pools are feasible (no native FP8 below Ironwood on the TPU side), the pool choice determines the marginal cost of the tokens, and the replica choice determines whether a cached prefix is reused or recomputed. But they operate at different timescales, and conflating them is how designs collapse. I decompose explicitly:</p>
+
+<ul>
+<li><strong>Milliseconds — per-request:</strong> variant selection (within the pre-approved set for the tenant), pool selection, replica selection, admission.</li>
+<li><strong>Minutes to hours — pool control:</strong> replica counts per (variant, hardware, config) cell, autoscaling, draining, brownout state.</li>
+<li><strong>Weeks — fleet planning:</strong> hardware mix, capacity purchases, which variants get compiled/validated for which chips. The router doesn't make these decisions but produces the demand and cost telemetry that drives them.</li>
+</ul>
+
+<h3>Clarifying questions (with assumed answers)</h3>
+<table>
+<tr><th style="width:44%">Question</th><th>Assumed answer</th></tr>
+<tr><td>Traffic scale and shape?</td><td>~1B requests/day, peak <strong>50K req/s</strong> aggregate; mean 2K prompt / 300 output tokens → peak ~100M prefill tok/s, ~15M decode tok/s fleet-wide. ~60% interactive, 40% batch-tier by token volume.</td></tr>
+<tr><td>SLO classes?</td><td>Three classes. <strong>A (agentic/interactive-fast):</strong> TTFT p99 ≤ 500 ms, TPOT p99 ≤ 30 ms. <strong>B (standard interactive):</strong> TTFT p99 ≤ 2 s, TPOT p99 ≤ 80 ms. <strong>C (batch):</strong> deadline-scheduled (e.g., complete within 24 h), no TTFT bound.</td></tr>
+<tr><td>Quality requirements?</td><td>Per-product minimum quality bars measured on per-product eval suites. Some products permit quality-for-cost trades (routing to distilled/quantized variants); some pin an exact variant. The <em>product team owns the bar; the platform owns the policy that respects it</em>.</td></tr>
+<tr><td>What is "cost", precisely?</td><td>Chip-seconds × amortized internal $/chip-hr → $/token, attributed per request. I'll assume internal amortized rates near 3-yr committed pricing plus overheads: <strong>v5e $0.80, Trillium $1.80, Ironwood $6.00, H100 $2.40, B200 $5.00 per chip/GPU-hour</strong> (assumptions, flagged in §2).</td></tr>
+<tr><td>Multi-region?</td><td>Yes, but I'll design a single region and note that cross-region routing adds a slower control loop (spillover on capacity exhaustion, ~100 ms RTT penalty) rather than changing the architecture.</td></tr>
+<tr><td>Does prefix locality matter?</td><td>Strongly: ~55% of interactive tokens share long system-prompt/tool-schema prefixes (multi-turn chat and agent loops), so cache-aware replica selection is a first-class cost lever, consistent with what Dynamo/llm-d-class routers exploit in production.</td></tr>
+<tr><td>Do we own the models?</td><td>Yes — we can distill, quantize, and create variants. (Follow-up in §8 covers the third-party case.)</td></tr>
+</table>
+
+<h3>Requirements</h3>
+<p><strong>Functional:</strong> route every request to a (variant, pool, replica) satisfying its SLO class and quality bar at minimum expected marginal cost; enforce per-tenant admission; support cascade escalation; expose degradation ("brownout") as an explicit, product-visible policy; attribute cost per request/tenant.</p>
+<p><strong>Non-functional, for the router itself:</strong> routing decision adds <strong>≤ 1 ms p99</strong> to the request path; router availability strictly above any single serving pool (it must survive pool failures it's routing around, so: stateless decision path, replicated soft state, static fallback tables); decisions must be explainable post-hoc (log the full decision vector per request); safe under predictor failure — every learned input has a dumb fallback.</p>
+
+<figure>
+<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d4a58"/></marker></defs>
+<rect x="20" y="18" width="820" height="96" rx="8" fill="#fdf3e3" stroke="#d97a1f"/>
+<text x="34" y="40" font-size="13" font-weight="700" fill="#b45309">FLEET PLANNING · weeks</text>
+<text x="34" y="60" font-size="12.5" fill="#1a2430">Hardware mix &amp; purchases · variant×hardware feasibility matrix · capacity vs. demand forecast</text>
+<rect x="40" y="72" width="220" height="30" rx="5" fill="#fff" stroke="#b45309"/><text x="150" y="91" font-size="12" text-anchor="middle">Demand + $/token telemetry in</text>
+<rect x="290" y="72" width="220" height="30" rx="5" fill="#fff" stroke="#b45309"/><text x="400" y="91" font-size="12" text-anchor="middle">Chip orders / decommissions out</text>
+<rect x="540" y="72" width="280" height="30" rx="5" fill="#fff" stroke="#b45309"/><text x="680" y="91" font-size="12" text-anchor="middle">Variant qualification (compile + eval per chip)</text>
+
+<rect x="20" y="146" width="820" height="96" rx="8" fill="#eaf1f8" stroke="#3673b5"/>
+<text x="34" y="168" font-size="13" font-weight="700" fill="#1d4e89">POOL CONTROL · minutes–hours</text>
+<text x="34" y="188" font-size="12.5" fill="#1a2430">Replica counts per (variant, hardware, config) cell · autoscale · drain · brownout state machine</text>
+<rect x="40" y="200" width="240" height="30" rx="5" fill="#fff" stroke="#3673b5"/><text x="160" y="219" font-size="12" text-anchor="middle">Routing tables pushed every ~10 s</text>
+<rect x="310" y="200" width="230" height="30" rx="5" fill="#fff" stroke="#3673b5"/><text x="425" y="219" font-size="12" text-anchor="middle">Per-cell cost/occupancy targets</text>
+<rect x="570" y="200" width="250" height="30" rx="5" fill="#fff" stroke="#3673b5"/><text x="695" y="219" font-size="12" text-anchor="middle">Spillover &amp; degradation policies</text>
+
+<rect x="20" y="274" width="820" height="102" rx="8" fill="#e9f4ee" stroke="#2e8b6a"/>
+<text x="34" y="296" font-size="13" font-weight="700" fill="#166a4a">PER-REQUEST · ≤1 ms</text>
+<rect x="40" y="308" width="150" height="54" rx="5" fill="#fff" stroke="#2e8b6a"/><text x="115" y="330" font-size="12" text-anchor="middle">Admission +</text><text x="115" y="346" font-size="12" text-anchor="middle">feature extraction</text>
+<rect x="220" y="308" width="150" height="54" rx="5" fill="#fff" stroke="#2e8b6a"/><text x="295" y="330" font-size="12" text-anchor="middle">Variant selection</text><text x="295" y="346" font-size="12" text-anchor="middle">(cascade / upfront)</text>
+<rect x="400" y="308" width="150" height="54" rx="5" fill="#fff" stroke="#2e8b6a"/><text x="475" y="330" font-size="12" text-anchor="middle">Pool selection</text><text x="475" y="346" font-size="12" text-anchor="middle">(cost-normalized)</text>
+<rect x="580" y="308" width="150" height="54" rx="5" fill="#fff" stroke="#2e8b6a"/><text x="655" y="330" font-size="12" text-anchor="middle">Replica selection</text><text x="655" y="346" font-size="12" text-anchor="middle">(cache-aware P2C)</text>
+<line x1="190" y1="335" x2="218" y2="335" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar)"/>
+<line x1="370" y1="335" x2="398" y2="335" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar)"/>
+<line x1="550" y1="335" x2="578" y2="335" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar)"/>
+<line x1="430" y1="242" x2="430" y2="272" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar)"/>
+<line x1="430" y1="114" x2="430" y2="144" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar)"/>
+<line x1="785" y1="376" x2="785" y2="392" stroke="none"/>
+<path d="M 800 335 C 850 335 850 60 842 60" fill="none" stroke="#8f2d2d" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<text x="852" y="200" font-size="11" fill="#8f2d2d" transform="rotate(90 852 200)">telemetry feedback</text>
+</svg>
+<figcaption><strong>Figure 1 — The three-timescale decomposition.</strong> Each layer sets constraints for the layer below and consumes telemetry from it. The per-request path only ever reads pre-computed tables; nothing on the ≤1 ms path does optimization.</figcaption>
+</figure>
+
+<div class="callout staff"><span class="tag">Staff signal</span>
+Opening with the timescale decomposition — and stating that the ms-path executes pre-computed policy while slower loops do the actual optimization — is what separates this from an L5 answer that designs a clever per-request scorer. It also pre-answers the availability question: the fast path degrades to static tables when every smart component above it fails.
+</div>
+<h2 id="s2"><span class="secno">2</span>Cost model first: the $/token table that grounds every decision</h2>
+
+<p>Before drawing any boxes, I build the cost surface the router will optimize over. Every routing decision is ultimately a comparison of marginal $/token across feasible (variant, hardware, config) cells, so if the arithmetic here is wrong, the router is confidently wrong at 50K req/s. The model separates <strong>prefill</strong> (compute-bound: FLOPs against peak matmul throughput × achievable MFU) from <strong>decode</strong> (bandwidth-bound: bytes of weights + KV read per step against HBM bandwidth × achievable utilization, amortized over batch occupancy).</p>
+
+<div class="assume"><span class="tag">Assumptions — flagged explicitly</span>
+<strong>Chip rates (internal amortized $/chip-hr):</strong> v5e $0.80 · Trillium (v6e) $1.80 · Ironwood $6.00 · H100 $2.40 · B200 $5.00. These sit between public 3-yr committed and on-demand prices (GCP list: Ironwood $12.00 OD/$5.40 CUD; Trillium $2.70/$1.22; v5e $1.20/$0.54; GPU market medians H100 ≈ $2.3–3.1, B200 ≈ $5.9) with power/facility/host overheads folded in. The <em>ratios</em> matter more than absolutes; the feedback plane (§5) keeps them honest.<br>
+<strong>Peak specs:</strong> Trillium: 918 BF16 TFLOPs (≈1,836 INT8 TOPs), 32 GB, 1.64 TB/s. Ironwood: 4,614 FP8 TFLOPs (≈2,307 BF16), 192 GB, 7.37 TB/s, first TPU with native FP8. H100 SXM: 989 BF16 / 1,979 FP8 dense TFLOPs, 80 GB, 3.35 TB/s. B200: 2,250 BF16 / 4,500 FP8 dense TFLOPs, 192 GB, 8 TB/s. v5e: 197 BF16 / 394 INT8, 16 GB, 0.82 TB/s.<br>
+<strong>Efficiency by regime:</strong> prefill MFU 55% TPU / 50% GPU (XLA + static shapes buy a few points); decode HBM utilization 65% TPU / 60% GPU. Reference decode operating point: <strong>batch B = 64, mean live context 2,048 tokens</strong>.<br>
+<strong>Models:</strong> 70B dense BF16 (140 GB weights, 140 GFLOP/token = 2·P, KV 320 KB/token: 80 layers × 8 GQA KV heads × 128 dim × K,V × 2 B); 70B FP8/W8 (70 GB, KV 160 KB/token; served as INT8 on pre-Ironwood TPUs — a real feasibility constraint the routing table must encode); 8B distilled FP8 (8 GB, 16 GFLOP/token, KV 65.5 KB/token). Attention FLOPs ignored at 2K context (&lt;5% correction); the model adds a quadratic term for long-context classes.
+</div>
+
+<h3>The formulas</h3>
+<pre>prefill $/tok = (2P FLOP/tok) / (chips · peak_flops · MFU) · (chips · $/chip-s)
+decode  $/tok = step_time / B · (chips · $/chip-s),
+  step_time   = (W_bytes + B · ctx · kv_bytes/tok) / (chips · HBM_BW · util)</pre>
+<p>Two consequences fall out immediately and shape the whole design. First, <strong>decode $/token is roughly invariant to tensor-parallel width</strong>: doubling chips doubles both aggregate bandwidth and cost, so TP width is a <em>latency (TPOT) knob, not a cost knob</em> — the router uses config choice to buy SLO headroom, not savings. Second, weights are read once per step regardless of batch, so <strong>$/token falls almost hyperbolically with batch occupancy</strong> until KV traffic or compute dominates. Occupancy is the strongest cost lever in the system.</p>
+
+<h3>The table (batch 64, ctx 2,048; configs chosen as min chips that fit weights + KV with headroom)</h3>
+<table>
+<tr><th>Variant / config</th><th>Trillium v6e</th><th>Ironwood</th><th>H100</th><th>B200</th></tr>
+<tr><td><strong>70B BF16</strong><br><span class="small">prefill / decode $/Mtok · TPOT</span></td>
+<td class="num">8-chip<br>$0.139 / $1.34<br>21.5 ms</td>
+<td class="num">2-chip<br>$0.184 / $0.995<br>19.1 ms</td>
+<td class="num">TP8<br>$0.189 / $0.949<br>11.4 ms</td>
+<td class="num">TP2<br>$0.173 / $0.827<br>19.1 ms</td></tr>
+<tr><td><strong>70B FP8/W8</strong><br><span class="small">INT8 on v6e (no native FP8)</span></td>
+<td class="num">4-chip<br>$0.069 / $0.671<br>21.5 ms</td>
+<td class="num">1-chip<br>$0.092 / $0.498<br>19.1 ms</td>
+<td class="num">TP2<br>$0.094 / $0.474<br>22.8 ms</td>
+<td class="num">TP1<br>$0.086 / $0.413<br>19.1 ms</td></tr>
+<tr><td><strong>8B distilled FP8/W8</strong></td>
+<td class="num">1-chip<br>$0.0079 / $0.122<br>15.6 ms</td>
+<td class="num">1-chip<br>$0.0105 / $0.090<br>3.5 ms</td>
+<td class="num">1 GPU<br>$0.011 / $0.086<br>8.3 ms</td>
+<td class="num">1 GPU<br>$0.0198 / $0.075<br>3.5 ms</td></tr>
+</table>
+
+<p class="small">Note the 8B × Ironwood cell: at B=64 the expensive chip <em>loses</em> to H100/B200 — 8 GB of weights and 8.6 GB of KV against 192 GB of HBM is capacity thrown away. Pushed to B=512 (68 GB KV) the same cell reaches $0.052/Mtok and wins the row. Occupancy again.</p>
+
+<div class="callout arith"><span class="tag">Arithmetic check — one cell end to end (70B FP8 on Ironwood, 1 chip)</span>
+<p>Decode bytes/step = weights 70 GB + KV 64·2048·160 KB = 70 + 21.5 = 91.5 GB.<br>
+Effective BW = 7.37 TB/s · 0.65 = 4.79 TB/s → step = 91.5/4790 = 19.1 ms → 64 tok / 19.1 ms = 3,350 tok/s.<br>
+Chip $ = $6.00/hr = $1.67e-3/s → decode = 1.67e-3 / 3,350 = <strong>$0.498/Mtok</strong>.<br>
+Prefill: eff FLOPs = 4,614 · 0.55 = 2,538 TFLOPs → 2.538e15 / 140e9 = 18.1K tok/s → 1.67e-3 / 18.1e3 = <strong>$0.092/Mtok</strong>.</p>
+<p>Compute-bound sanity check for decode: 64 · 140 GFLOP = 9.0 TFLOP/step → 9.0/2,538 = 3.5 ms of compute vs 19.1 ms of memory time → bandwidth-bound, model valid. (At B = 256: 14.1 ms compute vs 32.6 ms memory — still BW-bound. In fact at ctx 2K with FP8 KV, decode never goes compute-bound here: marginal HBM per token-step is 2048 · 160 KB / 4.79 TB/s = 68 µs vs. 55 µs of marginal compute, so $/tok asymptotes to the KV-traffic floor of ~$0.11/Mtok rather than crossing a compute roofline. The crossover exists only at shorter contexts.)</p>
+</div>
+
+<div class="callout arith"><span class="tag">Arithmetic check — the occupancy sweep (same cell)</span>
+<p>B = 16: bytes 70 + 5.4 = 75.4 GB → 15.7 ms → 1,017 tok/s → <strong>$1.64/Mtok</strong><br>
+B = 64: 91.5 GB → 19.1 ms → 3,350 tok/s → <strong>$0.498/Mtok</strong><br>
+B = 256: 70 + 86 = 156 GB → 32.6 ms → 7,850 tok/s → <strong>$0.213/Mtok</strong> (TPOT 32.6 ms — fails class A, fine for B/C)</p>
+<p>An 8× cost range on identical silicon from occupancy alone — wider than the spread between most hardware columns. This is the number I put on the whiteboard and keep pointing back at.</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 860 330" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<text x="20" y="28" font-size="15" font-weight="700" fill="#1a2430">Decode $/Mtok heatmap (B=64, ctx 2K) — darker = cheaper</text>
+<g font-size="12.5" fill="#1a2430">
+<text x="185" y="62" text-anchor="middle" font-weight="600">Trillium</text>
+<text x="355" y="62" text-anchor="middle" font-weight="600">Ironwood</text>
+<text x="525" y="62" text-anchor="middle" font-weight="600">H100</text>
+<text x="695" y="62" text-anchor="middle" font-weight="600">B200</text>
+<text x="100" y="105" text-anchor="end" font-weight="600">70B BF16</text>
+<text x="100" y="175" text-anchor="end" font-weight="600">70B FP8/W8</text>
+<text x="100" y="245" text-anchor="end" font-weight="600">8B FP8/W8</text>
+</g>
+<!-- row1: 1.34 0.995 0.949 0.827 ; row2: .671 .498 .474 .413 ; row3: .122 .025 .086 .075 (log scale coloring) -->
+<g stroke="#fff" stroke-width="2">
+<rect x="110" y="74" width="150" height="50" fill="#f3c9a8"/><rect x="280" y="74" width="150" height="50" fill="#eab98f"/><rect x="450" y="74" width="150" height="50" fill="#e8b489"/><rect x="620" y="74" width="150" height="50" fill="#e2a878"/>
+<rect x="110" y="144" width="150" height="50" fill="#d99a63"/><rect x="280" y="144" width="150" height="50" fill="#cd8a4e"/><rect x="450" y="144" width="150" height="50" fill="#cb874a"/><rect x="620" y="144" width="150" height="50" fill="#c37c3d"/>
+<rect x="110" y="214" width="150" height="50" fill="#a26126"/><rect x="280" y="214" width="150" height="50" fill="#95561e"/><rect x="450" y="214" width="150" height="50" fill="#92531c"/><rect x="620" y="214" width="150" height="50" fill="#874a16"/>
+</g>
+<g font-size="14" font-weight="700" text-anchor="middle" fill="#1a2430">
+<text x="185" y="104">$1.34</text><text x="355" y="104">$0.995</text><text x="525" y="104">$0.949</text><text x="695" y="104">$0.827</text>
+<text x="185" y="174">$0.671</text><text x="355" y="174">$0.498</text><text x="525" y="174">$0.474</text><text x="695" y="174">$0.413</text>
+</g>
+<g font-size="14" font-weight="700" text-anchor="middle" fill="#fff">
+<text x="185" y="244">$0.122</text><text x="355" y="244">$0.090</text><text x="525" y="244">$0.086</text><text x="695" y="244">$0.075</text>
+</g>
+<text x="110" y="296" font-size="12" fill="#3d4a58">Spread across hardware within a variant: ~1.6×. Spread across variants: ~5×. Spread across occupancy (not shown): ~8×.</text>
+<text x="110" y="314" font-size="12" fill="#3d4a58">Ranking the levers: occupancy ≳ variant ≫ hardware generation — this ordering drives the whole design.</text>
+</svg>
+<figcaption><strong>Figure 2 — The cost surface as a heatmap.</strong> The router's job, restated: keep every cell of this table at high occupancy, push each request to the cheapest cell whose quality and SLO constraints it satisfies, and keep the table itself fresh (§5).</figcaption>
+</figure>
+
+<h3>The two structural insights the table forces</h3>
+<p><strong>(i) Batching density is a cost lever as strong as model choice.</strong> Moving a request from 70B BF16 to 70B FP8 saves ~2×; moving a decode pool from B=16 to B=256 saves ~8×. So routing that <em>consolidates</em> traffic — fewer, fuller pools; batch-tier work admitted specifically to fill occupancy troughs; anti-fragmentation in replica selection — buys more than per-request cleverness. A router that scatters load "fairly" across half-empty replicas is actively destroying money while every dashboard shows green.</p>
+<p><strong>(ii) Hardware-generation arbitrage is real but second-order, and it's about granularity and sunk fleet, not raw $/token.</strong> At my assumed rates, 8B on already-owned v5e (2-chip, INT8: bytes 16.6 GB / (2·0.82·0.65 = 1.07 TB/s) = 15.6 ms → 4,100 tok/s at $1.60/hr → $0.108/Mtok) is beaten by B200 ($0.075) on paper — but the v5e fleet is depreciated, single-chip-granular (no TP fragmentation), and its marginal cost approaches power. Latency-tolerant class-C 8B traffic goes there precisely so Ironwood/B200 capacity stays reserved for the traffic that needs it. The arbitrage is an opportunity-cost argument, and the router is the mechanism that executes it.</p>
+
+<div class="callout staff"><span class="tag">Staff signal</span>
+L5 answers optimize per-request placement. The L6 move is to rank the levers with arithmetic — occupancy (8×) ≥ variant (2–5×) ≫ hardware (1.6×) — and then design the router primarily as an <em>occupancy-shaping machine</em>: cost-aware routing is mostly about keeping expensive pools saturated and steering slack-tolerant work to cheap or sunk capacity. Also note what the table quietly encodes: variant×hardware feasibility (no FP8 below Ironwood on TPUs) is data the routing table must carry, not something the fast path derives.
+</div>
+
+<div class="callout followup"><span class="tag">Interviewer follow-ups — §2</span>
+<p><strong>"Your MFU/BW-utilization numbers are assumptions. What if they're off by 20%?"</strong> The absolute $/Mtok shifts but the lever ordering doesn't, and the design only depends on the ordering plus continuously-measured cell throughputs (§5) — the static table is a prior, not the operating truth. The one place absolute error bites is fleet planning, which is why the planner consumes measured, not modeled, $/token.</p>
+<p><strong>"Why amortized internal rates instead of on-demand prices?"</strong> Because the fleet is owned/committed capacity: the marginal cost of routing a request is the opportunity cost of the chip-seconds, not a rental price. This changes decisions — e.g., filling occupancy troughs with batch work is nearly free on committed capacity, whereas on-demand pricing would (wrongly) tell you to scale to zero.</p>
+<p><strong>"Prefill is 5–10× cheaper per token than decode in your table. Does that surprise you?"</strong> No — it's the arithmetic-intensity gap: prefill does 2P FLOPs/token against compute; decode moves all weights per step against bandwidth. It's why disaggregation (§4) works, why prefix caching pays twice (skips <em>compute</em> but the bigger win is TTFT), and why output-heavy workloads dominate cost attribution.</p>
+</div>
+<h2 id="s3"><span class="secno">3</span>Model selection layer: cascades and quality-aware routing</h2>
+
+<p>Variant selection is where cost and quality actually trade against each other, so it gets the most explicit governance. The policy space per tenant is a pre-approved <em>variant ladder</em> (e.g., 8B-distilled → 70B-FP8 → 70B-BF16) with a per-product quality bar deciding which rungs are reachable and under what conditions.</p>
+
+<h3>Two mechanisms: upfront difficulty routing vs. cascade</h3>
+<p><strong>Upfront routing:</strong> a cheap difficulty estimator scores the request before any LLM runs, and the router commits to a variant once. The estimator is a small classifier (a few-hundred-M-param encoder or gradient-boosted model over features: prompt length, tenant, task type, retrieval hit count, historical per-tenant difficulty distribution, embedding-space distance to known-hard clusters). Latency ~1–2 ms on host CPU or a sliver of accelerator — inside the router budget. Its failure mode is silent misclassification, so it is calibrated (§5) and biased conservative: uncertain → bigger model.</p>
+<p><strong>Cascade:</strong> run the small model, escalate on low confidence (mean token logprob below a calibrated threshold, self-assessment token, or a verifier head). Cascades see the actual attempt, so they misroute less — but the escalated fraction pays both models and an extra serial round-trip.</p>
+
+<div class="callout arith"><span class="tag">Arithmetic check — cascade economics (mean request: 2K in / 300 out, B200 cells from §2)</span>
+<p>All-70B-FP8: 2048 · $0.086/M + 300 · $0.413/M = $1.77e-4 + $1.24e-4 = <strong>$3.0e-4/req</strong><br>
+All-8B: 2048 · $0.0198/M + 300 · $0.075/M = $4.1e-5 + $2.3e-5 = <strong>$6.3e-5/req</strong> (4.8× cheaper)<br>
+Cascade, 25% escalation (escalatees burn full 8B prefill + ~32 assessment tokens, then full 70B pass):<br>
+= $6.3e-5·0.75 + 0.25·($4.1e-5 + 32·$0.075/M + $3.0e-4) ≈ 4.7e-5 + 8.6e-5 = <strong>$1.3e-4/req → 2.3× cheaper than all-70B</strong>.<br>
+Escalation latency tax on the 25%: 8B prefill 29 ms + 32 tok · 3.5 ms + 70B re-prefill 127 ms ≈ <strong>+270 ms TTFT</strong> (prefix-cache transfer of the 8B KV doesn't help — different model, incompatible cache).</p>
+<p>Decision rule: cascade wins where escalation rate is low and the SLO class can absorb +270 ms on the tail (class B/C). Class A gets upfront routing only. Break-even escalation rate vs upfront routing ≈ where cascade cost + misroute cost curves cross; with these numbers, cascades stop paying above ~65–70% escalation.</p>
+</div>
+
+<h3>Quality accounting and the org contract</h3>
+<p>Quality bars are meaningless unless measured the way they're enforced. Per (product, variant): offline eval suites owned by the product team, evaluated per (variant, hardware-numerics) pair — W8A8-INT8 on Trillium and FP8 on Ironwood are not the same model even when the checkpoint is, so the same ladder rung has hardware-dependent quality — and re-run on every variant change (new quantization, new distill, new compiler release: quantization regressions are numerically silent and workload-dependent); online, a sampled shadow stream (~0.1–1%) scored by LLM-judge with periodic human audit, sliced <em>per traffic class</em>, never aggregate-only (Simpson's-paradox pathology, §7). The contract: <strong>product owns the bar and the eval; platform owns the routing policy and must prove, per policy change, that the bar holds</strong>. Any brownout rung below the bar requires product sign-off and is surfaced in the response metadata — degradation is a product-visible state, never a silent trade.</p>
+
+<h3>The honesty requirement: escalation-rate drift</h3>
+<p>A cascade's cost win is conditional on the small model staying good <em>for the current traffic distribution</em>. Escalation rate per (tenant, task-type) is therefore a first-class SLI with alerting on drift (CUSUM/EWMA against baseline): rising escalation means the cost win is evaporating in real time; <em>falling</em> escalation with flat quality scores can mean the confidence signal broke and garbage is passing — both directions page. This is the difference between a cascade and a slow-motion quality incident.</p>
+
+<div class="callout staff"><span class="tag">Staff signal</span>
+The L6 content here is not the cascade (that's literature — RouteLLM-style routers are commodity by 2026); it's (a) the explicit cost/latency arithmetic that decides <em>which SLO classes</em> may cascade, (b) the ownership contract that makes quality bars enforceable across org boundaries, and (c) treating escalation rate as a monitored invariant in both directions.
+</div>
+
+<h2 id="s4"><span class="secno">4</span>Placement and per-request routing</h2>
+
+<h3>Admission-time feature extraction</h3>
+<p>At admission we know: tenant, SLO class, prompt tokens (exact), tool/system-prompt hash → <strong>prefix-cache key</strong> (block-hashed, radix-prefix style), and variant eligibility from §3. We do <em>not</em> know output length, and almost every downstream estimate — decode-slot occupancy, completion time, KV memory reservation — depends on it. So we predict it: a small regressor over (tenant, task type, prompt features, stop conditions, historical per-tenant output distribution), predicting a <em>quantile band</em>, not a point (reserve at p70, admission-check at p95). Misprediction consequences are asymmetric: under-prediction over-commits KV memory → evictions/preemption storms mid-decode (expensive: evicting a 2K-context sequence discards ~0.3 GB of KV state and forces recompute); over-prediction strands capacity. Calibration by tenant, monitored in §5, with a conservative static fallback (per-tenant p95 historical).</p>
+
+<h3>Cache-aware replica selection, with the arithmetic</h3>
+<p>Replica choice inside a pool is a two-term score, in the same shape Dynamo's KV-aware router and llm-d's precise (KV-events-fed) scorer converged on: <code>score = α · prefix_overlap_benefit − predicted_queue_penalty</code>, over a router-side radix/prefix index maintained from engine cache events. The point of the arithmetic is to set α from first principles instead of vibes:</p>
+
+<div class="callout arith"><span class="tag">Arithmetic check — cache hit vs. load balance (70B FP8, B200 TP1)</span>
+<p>Lost 4K-token prefix → recompute: 4,096 tok / 16.1K tok/s = <strong>254 ms added TTFT</strong>; cost 4,096 · $0.086/M = <strong>$3.5e-4</strong> (≈ the entire serving cost of an average request, burned once).<br>
+KV bytes at stake: 4,096 · 160 KB = 655 MB.<br>
+→ Route to the cached replica unless its predicted queueing delay exceeds the alternative's by &gt; 254 ms (latency view); the cost view favors the cached replica even past that point, so class C tolerates far more queue skew for cache affinity than class A. α is therefore <em>per-SLO-class</em>, and the break-even is recomputed from live prefill throughput, not hard-coded.</p>
+</div>
+
+<figure>
+<svg viewBox="0 0 860 350" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<text x="20" y="26" font-size="15" font-weight="700" fill="#1a2430">TTFT vs. extra queueing at the cached replica (4K prefix, 70B FP8, B200)</text>
+<g stroke="#3d4a58" stroke-width="1.4">
+<line x1="80" y1="300" x2="820" y2="300"/><line x1="80" y1="300" x2="80" y2="50"/>
+</g>
+<g font-size="11.5" fill="#3d4a58">
+<text x="450" y="332" text-anchor="middle">extra queueing delay at cached replica vs. uncached alternative (ms)</text>
+<text x="30" y="180" transform="rotate(-90 30 180)" text-anchor="middle">TTFT (ms)</text>
+<text x="80" y="316" text-anchor="middle">0</text><text x="264" y="316" text-anchor="middle">100</text><text x="448" y="316" text-anchor="middle">200</text><text x="632" y="316" text-anchor="middle">300</text><text x="816" y="316" text-anchor="middle">400</text>
+<text x="72" y="304" text-anchor="end">0</text><text x="72" y="240" text-anchor="end">100</text><text x="72" y="176" text-anchor="end">200</text><text x="72" y="112" text-anchor="end">300</text><text x="72" y="58" text-anchor="end">400</text>
+</g>
+<!-- uncached: flat TTFT = 254ms prefill + base queue ~20 -> 274ms => y = 300 - 274*0.64 = 124.6 -->
+<line x1="80" y1="125" x2="820" y2="125" stroke="#8f2d2d" stroke-width="2.5" stroke-dasharray="7 5"/>
+<text x="700" y="112" font-size="12.5" fill="#8f2d2d" font-weight="600">uncached replica: ~274 ms (full prefill)</text>
+<!-- cached: TTFT = q + 20 (base) + ~28ms new-token prefill => starts ~48ms at q=0; slope 0.64px/ms -> from (80, 300-48*.64=269) to (820, 300-(400+48)*.64=13) -->
+<line x1="80" y1="269" x2="820" y2="13" stroke="#0e7c7b" stroke-width="2.5"/>
+<text x="180" y="235" font-size="12.5" fill="#0e7c7b" font-weight="600">cached replica: queue + ~28 ms residual prefill</text>
+<!-- breakeven at q where 48+q = 274 -> q=226ms... but recompute framing says 254. base queue cancels; breakeven q_delta = 254-28=226. x = 80 + 226*1.84=... x-scale: 740px/400ms=1.85 px/ms. x=80+226*1.85=498, y=125 -->
+<circle cx="498" cy="125" r="6" fill="#b45309"/>
+<line x1="498" y1="125" x2="498" y2="300" stroke="#b45309" stroke-width="1.4" stroke-dasharray="4 4"/>
+<text x="508" y="150" font-size="12.5" fill="#b45309" font-weight="700">break-even ≈ 226 ms of extra queue</text>
+<text x="508" y="167" font-size="11.5" fill="#b45309">(254 ms recompute − 28 ms residual)</text>
+<text x="150" y="80" font-size="12" fill="#3d4a58">left of break-even: cache affinity wins both latency and cost</text>
+<text x="510" y="270" font-size="12" fill="#3d4a58">right: latency favors load balance;</text>
+<text x="510" y="286" font-size="12" fill="#3d4a58">cost still favors cache (class-dependent α)</text>
+</svg>
+<figcaption><strong>Figure 3 — The cache-affinity vs. load-balance trade, quantified.</strong> The router's α per SLO class is just this chart's break-even, recomputed continuously from measured prefill throughput and queue predictors.</figcaption>
+</figure>
+
+<h3>Load signals and the routing algorithm</h3>
+<p>Queue depth in <em>requests</em> is a lagging, lying signal: ten 100-token requests ≠ one 32K-token request. The router tracks predicted <strong>work</strong>: outstanding prefill tokens (compute-seconds) and decode-slot occupancy (predicted via output-length bands), separately, normalized per replica by that replica's measured throughput — heterogeneous cells make raw counts meaningless.</p>
+<p><strong>Algorithm choice, justified at scale.</strong> A single global optimal scheduler at 50K req/s with a ≤1 ms budget is out; a fully random/round-robin layer wastes the cost model. I commit to a hierarchy: (1) the <strong>global policy layer</strong> resolves (variant, pool) from pushed routing tables (updated ~10 s) — a table lookup plus a cheap cost-normalized comparison across 2–3 candidate pools; (2) the <strong>cell-local scheduler</strong> (one per pool, ≤ low-thousands of replicas, full soft state: radix index + work estimates) picks the replica with <strong>weighted power-of-two-choices over cost-normalized predicted completion time</strong>: sample two candidates biased by prefix overlap, score both with the α-rule, take the winner. P2C keeps herding down under stale state (its classic property), makes the decision O(1), and degrades gracefully to plain P2C-by-work when the prefix index is unavailable. On TPU cells the scheduler is additionally <em>bucket-aware</em>: XLA static shapes mean prompts are padded into compiled length buckets, so the scheduler packs admissions toward bucket boundaries — padding waste is a router-visible cost term, a consideration GPU-side continuous batching doesn't have.</p>
+
+<h3>Disaggregated prefill/decode pools</h3>
+<p>Prefill and decode are different machines economically (§2), so class-A/B traffic runs disaggregated (Splitwise/Mooncake-lineage, as productized in Dynamo-style stacks): the router makes <em>two</em> placement decisions with a KV-transfer edge between them. Prefill pool choice optimizes compute cost + cache reuse; decode pool choice optimizes slot occupancy + TPOT headroom; the transfer cost gates which pairs are viable.</p>
+
+<div class="callout arith"><span class="tag">Arithmetic check — KV transfer (2K-token context, 70B FP8: 2,048 · 160 KB = 328 MB)</span>
+<p>NVLink domain (assume ~350 GB/s effective): 328/350,000 ≈ <strong>0.9 ms</strong> — free; pair freely within a domain.<br>
+Ironwood ICI cross-slice (9.6 Tb/s peak per chip; assume ~200 GB/s effective end-to-end): ≈ <strong>1.6 ms</strong> — cheap; ICI domain is the pairing boundary on the TPU side.<br>
+Cross-domain DCN at 200 Gbps NIC (~15 GB/s effective): ≈ <strong>22 ms</strong> — tolerable for class B, and it overlaps with decode-queue wait; but at 32K context (5.2 GB) it becomes 350 ms → cross-DCN pairing is banned for long-context class A. The router carries a per-(prefill-cell, decode-cell) transfer-cost matrix and treats it as one more edge weight.</p>
+</div>
+
+<h3>Admission control, brownout, and load shedding</h3>
+<p>Per-(tenant, SLO-class) token buckets on <em>predicted work</em> (prefill-compute-seconds and decode-slot-seconds, not request counts). Class C sits in a deadline-scheduled queue (EDF within cost-tier) and is the shock absorber: it back-fills occupancy troughs and is preempted first. Overload runs a staged, product-visible brownout ladder: (1) defer class C; (2) shift eligible class-B traffic down one variant rung <em>where the product pre-approved it</em>, tagged in response metadata; (3) shed class B by tenant priority with explicit 429/retry-after; class A sheds last. Every stage is a declared state machine transition with hysteresis — never an emergent behavior of a scoring function.</p>
+
+<div class="callout staff"><span class="tag">Staff signal</span>
+Three L6 markers in this section: work-based (not request-based) load signals with per-replica normalization; the cache-affinity coefficient derived from a break-even calculation and made SLO-class-dependent rather than tuned by feel; and brownout as an explicit, pre-negotiated, product-visible state machine — the difference between "the router degraded quality" being a design property versus an incident finding.
+</div>
+
+<div class="callout followup"><span class="tag">Interviewer follow-ups — §4</span>
+<p><strong>"Why P2C at the cell instead of a central optimal assignment?"</strong> At cell scale a central scheduler is actually feasible — and on TPU cells I'd lean further central because deterministic execution + static shapes make completion-time prediction tight enough to trust. The hierarchy is the real answer: the global tier must be table-driven for the latency budget and blast-radius isolation; within a cell, P2C-with-scoring gives ~all of central's benefit with none of its single-threaded hot loop, and it's robust to stale-state herding — the balanced-allocations results under stale information back this — where a greedy central scorer is not.</p>
+<p><strong>"Your output-length predictor is wrong 30% of the time. Does the system fall over?"</strong> No, by construction: reservations use quantile bands with an admission check at p95, decode pools hold an eviction-headroom reserve (~10% of KV memory), and sustained per-tenant misprediction trips the fallback to historical p95 — which costs stranded capacity, not correctness. The pathology table (§7) covers the storm case.</p>
+<p><strong>"Doesn't cache-affinity routing fight batching density?"</strong> They align more than they fight: affinity concentrates related traffic, which <em>raises</em> occupancy on fewer replicas. The genuine conflict is hot-prefix herding past a replica's capacity; the fix is bounded affinity — replicate the hot prefix's KV to a second replica when its queue-penalty term persistently exceeds the overlap benefit (exactly the imbalance signal the P2C score already computes).</p>
+</div>
+<h2 id="s5"><span class="secno">5</span>The feedback and estimation plane</h2>
+
+<p>Everything "smart" in this router is an estimate: the cost table, the output-length predictor, the difficulty classifier, the queue/work model, the transfer-cost matrix. The feedback plane is what keeps those estimates honest and the system accountable — and it's where routers quietly rot when it's an afterthought.</p>
+
+<h3>Closing the loop on the cost table</h3>
+<p>The §2 table is a prior. Production continuously measures, per (variant, hardware, config, batch-band, context-band) cell: achieved tok/s, achieved MFU/BW-utilization, occupancy distribution, and therefore <em>measured</em> $/Mtok. The routing tables consume measured values with the analytical model as sanity bound (alert when they diverge &gt; 15%: either the fleet regressed or the model is stale). This matters because the table genuinely goes stale: a single XLA or serving-stack release that changes decode throughput 15% silently re-orders pool preferences fleet-wide. Continuous micro-benchmarks (canary replicas replaying a fixed trace per release) catch this at rollout, not in the monthly cost review.</p>
+
+<h3>Predictors as production ML with a lifecycle</h3>
+<p>Output-length, difficulty, and completion-time predictors are trained on production logs (features frozen at admission time to avoid leakage), retrained on a cadence, and monitored for calibration (reliability diagrams per tenant; PSI on input feature drift). Non-negotiable properties for every learned component: <strong>a dumb, safe fallback</strong> (historical per-tenant quantiles; conservative "route big" for difficulty; plain P2C-by-work for placement), <strong>a kill switch</strong> (per-component flag flippable without deploy), and <strong>decision logging</strong> — every request's routing record carries the predictor versions, inputs, scores, and the counterfactual runner-up choice. At 3am, an on-call must be able to answer "why did this request go to that pool" from one log line, and "make the router boring again" with one flag.</p>
+
+<h3>Simulation and replay: how policy changes ship</h3>
+<p>No routing-policy change ships on live traffic first. The pipeline: (1) <strong>replay</strong> — deterministic simulator consumes sampled production traces (arrival times, token counts, prefix structure, measured per-cell service curves) and evaluates candidate policy vs. incumbent; (2) <strong>shadow</strong> — new policy computes (and logs) decisions on live traffic without acting; (3) staged rollout by cell with automatic rollback on SLO/cost guardrails. The counterfactual metric is defined up front: <strong>Δ$ per Mtok at equal-or-better SLO attainment per class, over the same trace</strong> — cost deltas quoted without pinning SLO attainment are how routing teams flatter themselves.</p>
+
+<figure>
+<svg viewBox="0 0 860 340" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d4a58"/></marker></defs>
+<rect x="330" y="24" width="200" height="58" rx="8" fill="#e9f4ee" stroke="#2e8b6a" stroke-width="1.5"/>
+<text x="430" y="48" font-size="13.5" text-anchor="middle" font-weight="700">Routing policy</text>
+<text x="430" y="66" font-size="12" text-anchor="middle">(tables + predictors)</text>
+<rect x="620" y="130" width="210" height="58" rx="8" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="725" y="154" font-size="13.5" text-anchor="middle" font-weight="700">Serving fleet</text>
+<text x="725" y="172" font-size="12" text-anchor="middle">per-cell execution</text>
+<rect x="330" y="244" width="200" height="58" rx="8" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="430" y="268" font-size="13.5" text-anchor="middle" font-weight="700">Telemetry</text>
+<text x="430" y="286" font-size="12" text-anchor="middle">measured $/Mtok · calib · SLO</text>
+<rect x="30" y="130" width="210" height="58" rx="8" fill="#eaf1f8" stroke="#3673b5" stroke-width="1.5"/>
+<text x="135" y="154" font-size="13.5" text-anchor="middle" font-weight="700">Replay simulator</text>
+<text x="135" y="172" font-size="12" text-anchor="middle">candidate vs. incumbent, Δ$ @ =SLO</text>
+<path d="M530 60 C 700 70 725 90 725 128" fill="none" stroke="#3d4a58" stroke-width="1.8" marker-end="url(#ar2)"/>
+<text x="660" y="88" font-size="11.5" fill="#3d4a58">decisions</text>
+<path d="M725 190 C 725 250 600 273 532 273" fill="none" stroke="#3d4a58" stroke-width="1.8" marker-end="url(#ar2)"/>
+<text x="640" y="252" font-size="11.5" fill="#3d4a58">measurements</text>
+<path d="M330 273 C 200 273 135 240 135 190" fill="none" stroke="#3d4a58" stroke-width="1.8" marker-end="url(#ar2)"/>
+<text x="160" y="248" font-size="11.5" fill="#3d4a58">traces + service curves</text>
+<path d="M135 128 C 135 70 240 55 328 53" fill="none" stroke="#3d4a58" stroke-width="1.8" marker-end="url(#ar2)"/>
+<text x="150" y="86" font-size="11.5" fill="#3d4a58">validated policy update</text>
+<path d="M400 244 L 415 84" fill="none" stroke="#c05050" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+<text x="255" y="170" font-size="11.5" fill="#8f2d2d">calibration drift → fallback / kill switch</text>
+<rect x="588" y="24" width="248" height="56" rx="8" fill="#fdf3e3" stroke="#d97a1f" stroke-width="1.4"/>
+<text x="712" y="46" font-size="12.5" text-anchor="middle" font-weight="700" fill="#b45309">Release canaries</text>
+<text x="712" y="64" font-size="11.5" text-anchor="middle" fill="#1a2430">fixed-trace microbench per compiler/stack release</text>
+<path d="M700 82 L 700 128" stroke="#d97a1f" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#ar2)"/>
+</svg>
+<figcaption><strong>Figure 4 — The feedback/estimation control loop.</strong> Policy changes travel the outer loop (replay → shadow → staged rollout); predictor failures travel the inner red edge straight to fallbacks. Release canaries protect the cost table from compiler-release staleness.</figcaption>
+</figure>
+
+<div class="callout staff"><span class="tag">Staff signal</span>
+"Smart" and "accountable" are the same requirement stated twice: every learned component ships with a dumb fallback, a kill switch, decision logging with counterfactuals, and a calibration monitor — and the promotion metric (Δ$ at equal SLO attainment on replayed traces) is defined before the policy is written. An L5 answer adds ML to the router; the L6 answer adds the machinery that lets you remove it at 3am.
+</div>
+
+<div class="callout followup"><span class="tag">Interviewer follow-ups — §5</span>
+<p><strong>"Your replay simulator will diverge from reality. How much fidelity do you need?"</strong> Enough to rank policies, not to predict absolutes — the promotion decision is a paired comparison on identical traces, which cancels most modeling error. The known fidelity gaps (feedback effects: routing changes alter cache hit structure, which alters service times) are exactly why shadow mode and staged rollout follow replay rather than replacing it.</p>
+<p><strong>"What breaks first if telemetry lags by five minutes?"</strong> Nothing on the fast path — per-request decisions run on cell-local state (sub-second) plus routing tables (10 s). Five-minute lag hits pool control: autoscaling and brownout transitions get sluggish, which the hysteresis margins are sized to absorb. The design rule: each timescale layer only depends on telemetry at least one order of magnitude fresher than its own actuation period.</p>
+<p><strong>"How do you keep the difficulty classifier from being gamed by tenants who learn that 'hard-looking' prompts get the big model?"</strong> Difficulty affects which rung of the tenant's <em>own pre-approved, billed</em> ladder serves them — tenants pay attributed cost, so gaming buys them a bigger bill, not free quality. Where quality is platform-subsidized, the classifier's per-tenant calibration drift monitor is the detection mechanism, and the response is contractual (quota/pricing), not adversarial ML.</p>
+</div>
+
+<h2 id="s6"><span class="secno">6</span>Worked end-to-end example: one request, real numbers</h2>
+
+<p>Class-B interactive request: 2,048-token prompt of which 1,600 tokens are a shared system-prompt + tool-schema prefix; predicted output 300 (p70 band 180–520); tenant quality bar requires 70B-class; tenant pre-approved FP8.</p>
+
+<ol>
+<li><strong>Admission (0.1 ms):</strong> token bucket ok. Features: prefix key hash (1,600-token block chain), predicted output band, SLO class B (TTFT ≤ 2 s, TPOT ≤ 80 ms).</li>
+<li><strong>Variant (0.2 ms):</strong> difficulty score 0.31 — below the 8B threshold, but the quality bar pins ≥70B → <strong>70B-FP8</strong> (ladder floor wins over difficulty estimate; the score is logged anyway for §5 calibration).</li>
+<li><strong>Pool selection (0.3 ms):</strong> routing table offers two feasible pools with capacity: <em>Ironwood cell IW-3</em> (prefix index reports the 1,600-token prefix cached, predicted queue 120 ms) and <em>B200 cell B2-7</em> (no prefix hit, predicted queue 20 ms). Cost-normalized comparison:
+<div class="callout arith"><span class="tag">Arithmetic check — the pool comparison</span>
+<p>IW-3: prefill only 448 new tokens: 448 / 18.1K tok/s = 25 ms → TTFT ≈ 120 + 25 = <strong>145 ms</strong>; prefill cost 448 · $0.092/M = <strong>$4.1e-5</strong>.<br>
+B2-7: full 2,048-token prefill: 2,048 / 16.1K = 127 ms → TTFT ≈ 20 + 127 = <strong>147 ms</strong>; prefill cost 2,048 · $0.086/M = <strong>$1.76e-4</strong>.<br>
+Latency ≈ tie (both ≪ 2 s budget); cost favors IW-3 by 4.3× → <strong>route IW-3</strong>. Note the structure: the cache hit converted a 6-chip-generation pricing gap into a win for the more expensive chip — prefix locality dominates hardware choice at these overlap lengths.</p>
+</div></li>
+<li><strong>Replica selection (0.2 ms):</strong> within IW-3, P2C samples the prefix-holding replica and one alternative; prefix replica's work-normalized completion estimate wins: break-even queue delta for a 1,600-token prefix at IW prefill rates is 1,600 / 18.1K ≈ 88 ms of avoided recompute, the observed queue delta between the two sampled replicas is 60 ms, and the class-B cost term widens the affinity margin further. Slot reserved at p70 = 380 tokens KV (380 · 160 KB = 61 MB), admission-checked at p95.</li>
+<li><strong>Execution:</strong> prefill lands in a static-shape bucket (512-token bucket → 64 padding tokens, 12.5% padding waste logged as cost); the 328 MB of KV (2,048 · 160 KB) transfers to IW-3's decode slice over ICI (≈1.6 ms, overlapped with decode-queue wait — the §4 pairing matrix at work); decode joins that slice's continuous batch at occupancy ≈ 200 → step time from §2's sweep ≈ 29 ms TPOT (&lt; 80 ms ✓), decode $/Mtok ≈ $0.24 at that occupancy.</li>
+<li><strong>Accounting:</strong> logged cost = prefill $4.1e-5 + decode 300 · $0.24/M = $7.2e-5 → <strong>$1.1e-4 total</strong>, vs. $3.0e-4 for the naive (uncached, B=64, B200) path — attributed to the tenant, with the runner-up decision and predictor versions in the routing record.</li>
+</ol>
+
+<figure>
+<svg viewBox="0 0 860 250" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3d4a58"/></marker></defs>
+<g font-size="12">
+<rect x="20" y="90" width="120" height="60" rx="7" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="80" y="115" text-anchor="middle" font-weight="700">Admission</text><text x="80" y="132" text-anchor="middle">bucket + features</text>
+<rect x="170" y="90" width="130" height="60" rx="7" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="235" y="110" text-anchor="middle" font-weight="700">Variant</text><text x="235" y="127" text-anchor="middle">score .31, bar pins</text><text x="235" y="142" text-anchor="middle">70B-FP8</text>
+<rect x="330" y="30" width="180" height="55" rx="7" fill="#e9f4ee" stroke="#2e8b6a" stroke-width="1.8"/>
+<text x="420" y="52" text-anchor="middle" font-weight="700" fill="#166a4a">IW-3 · prefix hit</text><text x="420" y="70" text-anchor="middle">TTFT 145 ms · $4.1e-5</text>
+<rect x="330" y="160" width="180" height="55" rx="7" fill="#faecec" stroke="#c05050" stroke-width="1.5"/>
+<text x="420" y="182" text-anchor="middle" font-weight="700" fill="#8f2d2d">B2-7 · cold</text><text x="420" y="200" text-anchor="middle">TTFT 147 ms · $1.76e-4</text>
+<rect x="560" y="90" width="130" height="60" rx="7" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="625" y="112" text-anchor="middle" font-weight="700">Replica (P2C)</text><text x="625" y="130" text-anchor="middle">prefix holder wins</text><text x="625" y="145" text-anchor="middle">reserve p70 KV</text>
+<rect x="720" y="90" width="120" height="60" rx="7" fill="#fff" stroke="#3d4a58" stroke-width="1.5"/>
+<text x="780" y="112" text-anchor="middle" font-weight="700">Execute + log</text><text x="780" y="130" text-anchor="middle">total $1.1e-4</text><text x="780" y="145" text-anchor="middle">TPOT 29 ms</text>
+<line x1="140" y1="120" x2="168" y2="120" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar3)"/>
+<line x1="300" y1="112" x2="328" y2="65" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar3)"/>
+<line x1="300" y1="128" x2="328" y2="180" stroke="#3d4a58" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#ar3)"/>
+<line x1="510" y1="60" x2="558" y2="108" stroke="#2e8b6a" stroke-width="2" marker-end="url(#ar3)"/>
+<text x="516" y="98" font-size="11" fill="#166a4a" font-weight="600">4.3× cheaper</text>
+<line x1="690" y1="120" x2="718" y2="120" stroke="#3d4a58" stroke-width="1.6" marker-end="url(#ar3)"/>
+</g>
+</svg>
+<figcaption><strong>Figure 5 — The routing decision flow for the worked request.</strong> Dashed edge = evaluated runner-up, retained in the routing record for counterfactual accounting (§5, §8).</figcaption>
+</figure>
+<h2 id="s7"><span class="secno">7</span>Failure modes and pathologies</h2>
+
+<div class="callout patho"><span class="tag">Pathology reference table</span>
+<table style="margin:8px 0">
+<tr><th style="width:24%">Pathology</th><th style="width:27%">Symptom</th><th style="width:24%">Detection signal</th><th>Mitigation</th></tr>
+<tr><td>Output-length underprediction</td><td>KV memory over-commit → mid-decode evictions → preemption storms; TPOT p99 spikes as evicted sequences recompute</td><td>Eviction rate per cell; predictor p95-coverage below target, per tenant</td><td>Quantile-band reservation with p95 admission check; ~10% KV headroom reserve; per-tenant fallback to historical p95 on coverage breach</td></tr>
+<tr><td>Cascade escalation storm</td><td>Distribution shift makes the 8B model unconfident fleet-wide → 70B pools absorb 2× load with an extra serial hop; class-B TTFT collapse</td><td>Escalation-rate EWMA per (tenant, task) with drift alert; 70B pool admission-queue growth correlated with escalation events</td><td>Escalation-rate circuit breaker: above threshold, flip affected traffic to upfront routing at the big variant (skip the doomed 8B attempt); pre-provisioned surge headroom in 70B pools sized to the breaker threshold</td></tr>
+<tr><td>Cache-affinity herding</td><td>One hot shared prefix concentrates traffic on a replica past capacity; queueing eats the cache win</td><td>Per-replica work skew vs. cell mean; affinity-score wins with negative realized latency delta (the router grades its own decisions)</td><td>Bounded affinity: replicate hot-prefix KV to a second replica when queue-penalty persistently exceeds overlap benefit; P2C's load term provides natural damping</td></tr>
+<tr><td>Cost-model staleness after a compiler release</td><td>XLA/serving release changes decode throughput 15%; routing tables now prefer the wrong pools; fleet cost drifts up with no alert</td><td>Release-canary fixed-trace microbench delta; measured-vs-model $/Mtok divergence &gt; 15%</td><td>Cost table consumes measured throughput; release gate blocks table promotion until canaries pass; model divergence pages the perf team</td></tr>
+<tr><td>SLO-class starvation</td><td>Class C deadline misses pile up because interactive traffic permanently claims all occupancy backfill</td><td>Deadline-attainment SLI per class; class-C queue age p99</td><td>EDF with aging within class C; minimum capacity floor per class in pool control (starvation is a capacity-plan bug, not a scheduler bug — surface it there)</td></tr>
+<tr><td>Pool oscillation (control instability)</td><td>Routing tables flip traffic between two near-tied pools each update; batch occupancy thrashes on both; cost rises while each snapshot looks fine</td><td>Table-diff churn metric; per-pool occupancy variance at the table-update frequency</td><td>Hysteresis band on pool preference (switch only on &gt; X% sustained advantage); damped table updates (EWMA of cost estimates); randomized per-frontend update jitter</td></tr>
+<tr><td>Quality regression hidden by aggregate metrics</td><td>Aggregate judge scores flat while one tenant's traffic silently degraded (mix shift masks it — Simpson's paradox)</td><td>Quality SLIs sliced per (tenant, class, variant), never aggregate-only; mix-shift-adjusted control charts</td><td>Per-slice quality bars with per-slice alerting; routing changes gated on worst-slice delta, not mean delta</td></tr>
+<tr><td>Degraded hardware silently absorbing traffic</td><td>A replica with throttled HBM (thermal, ECC masking) runs at 60% throughput; work-based router keeps feeding it "because its queue drains"; its $/Mtok is 1.7× fleet</td><td>Per-replica measured $/Mtok vs. cell distribution (outlier detection); throughput-normalization factor drift</td><td>Replica-level cost outliers auto-drain to canary status; normalization factors recomputed from measured, not nameplate, throughput</td></tr>
+</table>
+</div>
+
+<figure>
+<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg" font-family="Avenir Next,Segoe UI,sans-serif">
+<text x="20" y="26" font-size="15" font-weight="700" fill="#1a2430">Anatomy of an escalation storm (annotated time-series)</text>
+<g stroke="#3d4a58" stroke-width="1.4"><line x1="70" y1="250" x2="830" y2="250"/><line x1="70" y1="250" x2="70" y2="50"/></g>
+<g font-size="11.5" fill="#3d4a58">
+<text x="450" y="280" text-anchor="middle">time (minutes)</text>
+<text x="26" y="150" transform="rotate(-90 26 150)" text-anchor="middle">escalation rate / TTFT</text>
+<text x="70" y="266" text-anchor="middle">0</text><text x="260" y="266" text-anchor="middle">10</text><text x="450" y="266" text-anchor="middle">20</text><text x="640" y="266" text-anchor="middle">30</text><text x="830" y="266" text-anchor="middle">40</text>
+</g>
+<!-- escalation rate: baseline 25% then ramps at t=10 to 65% by t=20, breaker at t=22 drops routed cascades -->
+<path d="M70 210 L260 208 C 330 200 380 130 450 105 L 488 96" fill="none" stroke="#b45309" stroke-width="2.5"/>
+<path d="M488 96 L 500 96 L 505 200 L 830 202" fill="none" stroke="#b45309" stroke-width="2.5" stroke-dasharray="6 4"/>
+<text x="140" y="200" font-size="12" fill="#b45309" font-weight="600">escalation rate ~25%</text>
+<!-- TTFT p99 class B: flat then lags escalation, spikes, recovers after breaker -->
+<path d="M70 230 L300 228 C 380 224 430 170 470 120 C 495 90 520 80 545 110 C 600 180 700 225 830 228" fill="none" stroke="#8f2d2d" stroke-width="2.5"/>
+<text x="600" y="120" font-size="12" fill="#8f2d2d" font-weight="600">class-B TTFT p99 (lags, then spikes)</text>
+<line x1="260" y1="250" x2="260" y2="60" stroke="#3d4a58" stroke-width="1.2" stroke-dasharray="4 4"/>
+<text x="266" y="70" font-size="11.5" fill="#3d4a58">t=10: upstream product ships new agent workflow → distribution shift</text>
+<line x1="380" y1="250" x2="380" y2="88" stroke="#1d4e89" stroke-width="1.2" stroke-dasharray="4 4"/>
+<text x="386" y="96" font-size="11.5" fill="#1d4e89">t=16: EWMA drift alert fires</text>
+<line x1="497" y1="250" x2="497" y2="60" stroke="#166a4a" stroke-width="1.6" stroke-dasharray="4 4"/>
+<text x="503" y="180" font-size="11.5" fill="#166a4a" font-weight="600">t=22: circuit breaker →</text>
+<text x="503" y="196" font-size="11.5" fill="#166a4a">upfront-route affected</text>
+<text x="503" y="212" font-size="11.5" fill="#166a4a">traffic straight to 70B</text>
+</svg>
+<figcaption><strong>Figure 6 — The escalation-storm pathology.</strong> The dangerous window is between the shift and the breaker: 70B pools absorb double load <em>plus</em> a wasted 8B attempt per request. Sizing the breaker threshold and the 70B surge headroom together is a §2-style arithmetic exercise, not a tuning exercise.</figcaption>
+</figure>
+
+<h2 id="s8"><span class="secno">8</span>Consolidated interviewer follow-ups (the four hard ones)</h2>
+
+<div class="callout followup"><span class="tag">"Why not one big model on the cheapest $/token hardware, no cascade?"</span>
+<p>Because the cost table says the variant lever is ~5× while the hardware lever is 1.6× — collapsing variants throws away the big lever to simplify the small one. The honest part of the challenge is operational: cascades add predictors, drift monitoring, and an org contract, and if a fleet lacks the maturity to run those (§5), a single-variant fleet with excellent occupancy shaping captures the majority of achievable savings at a fraction of the complexity. I'd stage it exactly that way: occupancy + placement first (no quality risk), variants second, cascades last — each stage justified by its own replay-measured Δ$.</p>
+</div>
+
+<div class="callout followup"><span class="tag">"How does this change if you serve third-party models instead of owning them?"</span>
+<p>The quality-aware layer shrinks and the contracts grow. No distillation, no custom quantization without provider terms permitting it, and quality bars must be validated per provider-pushed model update you don't control — so the eval/canary plane becomes the front line, and variant ladders become <em>across-provider</em> ladders governed by commercial terms (rate limits, per-token pricing replacing chip-second cost as the objective). Placement optimization survives intact for self-hosted third-party weights; for API-backed models the "pool" abstraction becomes a priced external endpoint and the router's cost model consumes list prices instead of §2 arithmetic — structurally the same optimizer with a different cost column.</p>
+</div>
+
+<div class="callout followup"><span class="tag">"TPU vs. GPU: what actually changes for the router?"</span>
+<p>Four things. (1) <strong>Static-shape buckets:</strong> XLA compilation quantizes prompt lengths into buckets, so admission batching must pack toward bucket boundaries and padding waste is a router-visible cost term; GPU continuous batching has no analog. (2) <strong>Deterministic execution:</strong> TPU step times are tight distributions, so completion-time prediction is trustworthy enough to lean more central/greedy in cell scheduling, where GPU jitter demands P2C's robustness. (3) <strong>ICI-domain topology:</strong> the placement atom is a slice within an ICI domain, and the disaggregated pairing matrix is ICI-domain-aware (cheap intra-domain KV transfer, expensive DCN); on the GPU side the analogous boundary is the NVLink domain. (4) <strong>Feasibility matrix:</strong> no native FP8 below Ironwood means the variant×hardware table has holes (INT8 stand-ins on v5e/v6e with their own eval'd quality deltas) — variant availability is hardware-conditional, which pure-GPU designs never confront.</p>
+</div>
+
+<div class="callout followup"><span class="tag">"How do you prove the router saves money?"</span>
+<p>This is a counterfactual-accounting problem, and hand-waving it is how routing teams lose credibility with finance. Three tiers of evidence: (1) <strong>replay</strong> — incumbent vs. baseline policy on identical traces, Δ$ at equal SLO attainment (the clean but simulated number); (2) <strong>per-request runner-up logging</strong> — every routing record carries the evaluated alternative and its estimated cost, so realized savings are integrable directly from production logs (estimated counterfactual, real traffic); (3) <strong>holdback cells</strong> — a small fraction of traffic permanently on the naive policy as a live control, the only estimate that captures feedback effects like cache-structure shifts. The honest headline number is (3), with (1) and (2) as attribution detail; and the denominator is always $/Mtok at fixed SLO attainment, because raw $ savings can be manufactured by quietly missing SLOs.</p>
+</div>
+
+<h2 id="s9"><span class="secno">9</span>Staff-signal summary</h2>
+<div class="callout staff"><span class="tag">What separates L6 from L5 across this design</span>
+<p><strong>Cost model before architecture</strong> — and the lever ranking (occupancy 8× ≥ variant ~5× ≫ hardware 1.6×) derived with shown arithmetic, then used to allocate design effort. <strong>Batching density as the real lever</strong> — the router framed as an occupancy-shaping machine, with anti-fragmentation and batch-tier backfill as first-class mechanisms. <strong>Timescale decomposition</strong> — the ≤1 ms path executes pre-computed policy; optimization lives in slower loops with hysteresis. <strong>Learned components with safe fallbacks</strong> — kill switches, decision logging with counterfactuals, calibration monitoring; smart and accountable as one requirement. <strong>Explicit, product-visible degradation</strong> — brownout as a pre-negotiated state machine, quality bars owned by products and enforced per slice. <strong>The counterfactual savings proof</strong> — holdback cells plus runner-up logging, denominated at fixed SLO attainment.</p>
+</div>
+
+<h2 id="s10"><span class="secno">10</span>60-minute delivery run sheet</h2>
+
+<h3>Opening five minutes (near-verbatim)</h3>
+<p>"Before I draw anything, two framing moves. First, 'routing' here is three coupled decisions — which model variant, which hardware pool, which replica — and they run at three timescales: per-request in under a millisecond, pool sizing in minutes, hardware mix in weeks. I'll design the fast path to execute pre-computed policy and put the actual optimization in the slower loops. Second, I want to build the cost model before the architecture, because every routing decision is a $/token comparison and I'd rather we agree on the arithmetic than argue about boxes. Let me confirm scale and SLOs — I'll assume ~1B requests/day peaking at 50K/s, three SLO classes, per-product quality bars, and that cost means chip-seconds at internal amortized rates. The router itself gets an SLO: ≤1 ms p99 added latency and availability above any pool it routes to." Then straight into the prefill/decode cost formulas and the 3×4 table.</p>
+
+<h3>Whiteboard order</h3>
+<ol>
+<li>Timescale decomposition (three horizontal bands — Figure 1 skeleton).</li>
+<li>Cost formulas + the table, with one cell computed live (Ironwood 70B FP8) and the occupancy sweep — this is the anchor artifact; everything after points back at it.</li>
+<li>Variant ladder + cascade-vs-upfront with the 2.7× arithmetic and the escalation-drift monitor.</li>
+<li>Placement: work-based signals → hierarchical P2C → cache-affinity break-even chart → disagg pairing with the KV-transfer numbers.</li>
+<li>Feedback plane as a control loop; replay → shadow → staged rollout.</li>
+<li>If time: the worked request end-to-end (it re-exercises every layer with consistent numbers).</li>
+</ol>
+
+<h3>The three deep-dives to steer toward</h3>
+<p>(1) The cost table and occupancy sweep — it demonstrates hardware-level fluency and sets up every later argument. (2) Cache-aware routing arithmetic — the break-even derivation shows judgment under a real tension rather than a memorized pattern. (3) The feedback plane — fallbacks, kill switches, replay validation — because it's where most candidates' "smart router" answers have nothing.</p>
+
+<h3>Closing beat</h3>
+<p>Validation methodology (holdbacks + counterfactual logging, Δ$ at equal SLO attainment) as the proof-of-value story, then the TPU/GPU contrast (buckets, determinism, ICI domains, FP8 feasibility) to land the platform-specific expertise.</p>
+
+<h3>Two questions to ask back</h3>
+<ol>
+<li>"Where does your fleet actually sit on the occupancy distribution today — and is batch-tier backfill into interactive pools organizationally on the table, or do product isolation requirements rule it out?" (Reveals whether the biggest lever is available, and shows I know the constraint is often organizational.)</li>
+<li>"When a compiler or serving-stack release shifts per-cell throughput, what's the current path from that change to the routing layer's cost assumptions — automated, or a human noticing a dashboard?" (Probes the staleness pathology and signals I'd own the perf↔serving seam.)</li>
+</ol>
+
+<hr>
+<p class="small">All $/token figures derive from the stated assumptions (chip rates, MFU/BW utilization, B=64 / ctx 2K reference point) and are internally consistent to rounding; they are priors for a measured-telemetry system, not market quotes. Pricing anchors: Google Cloud TPU list pricing and mid-2026 GPU market medians as of July 2026.</p>
+
+</div></body></html>
